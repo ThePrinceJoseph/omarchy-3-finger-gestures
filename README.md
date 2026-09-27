@@ -83,8 +83,12 @@ Omarchy's window animation speed.
 
 ## Good to know
 
-- **The tray takes the keyboard on purpose.** Right after a swipe down, typing goes to
-  the tray until you press Escape. If you would rather it never grabbed the keyboard,
+- **The dock takes the keyboard on purpose.** Right after a swipe down, typing goes to
+  the dock until you press Escape. While it does, everything else on screen is lightly
+  blurred and dimmed so that is obvious; a workspace with no windows stays clear, since
+  that is where the tiles are headed. Omarchy keeps blur off globally, so it is switched
+  on only for that moment and your own blur settings are put back afterwards (strength:
+  `M.scrim_blur` in `minimize.lua`). If you would rather it never grabbed the keyboard,
   remove the `else if (newest) root.focusMode = true` line in `Tray.qml`.
 - **Why 5, and at most 12.** Tiles share the screen width and titles shrink to fit: on a
   1280-wide screen five tiles keep about 22 characters of title, twelve are down to a

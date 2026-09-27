@@ -522,6 +522,47 @@ Item {
     }
   }
 
+  // Scrim: while the dock has the keyboard, everything else on screen is
+  // blurred and slightly dimmed so it is obvious where typing goes. A
+  // workspace with no windows stays clear, suggesting that is where the tiles
+  // are headed. Drawn on the Top layer so the dock (Overlay) is always above it.
+  function workspaceHasWindows(scr) {
+    var mons = Hyprland.monitors.values
+    for (var i = 0; i < mons.length; i++) {
+      var m = mons[i]
+      if (!m || !scr || m.name !== scr.name) continue
+      var ws = m.activeWorkspace
+      return !!ws && ws.toplevels && ws.toplevels.values.length > 0
+    }
+    return false
+  }
+  readonly property bool scrimAnywhere: {
+    if (!root.focusMode || root.windows.length === 0) return false
+    var screens = Quickshell.screens
+    for (var i = 0; i < screens.length; i++) if (root.workspaceHasWindows(screens[i])) return true
+    return false
+  }
+  onScrimAnywhereChanged: Quickshell.execDetached(["hyprctl", "dispatch",
+    "(function() if Minimize and Minimize.scrim then Minimize.scrim(" + (root.scrimAnywhere ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
+
+  Variants {
+    model: Quickshell.screens
+
+    PanelWindow {
+      id: scrim
+      required property var modelData
+      screen: modelData
+      visible: root.focusMode && root.windows.length > 0 && root.workspaceHasWindows(scrim.screen)
+      anchors { top: true; bottom: true; left: true; right: true }
+      color: Qt.rgba(0, 0, 0, 0.08)
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.namespace: "omarchy-minimized-scrim"
+      WlrLayershell.layer: WlrLayer.Top
+      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+      mask: Region {}
+    }
+  }
+
   // Larger preview right above the hovered tile: the full title and a bigger
   // picture. Drawn on a full-screen transparent surface so it can be placed
   // by exact coordinates; fades in and out.

@@ -510,6 +510,32 @@ hl.exec_cmd("mkdir -p " .. M.thumb_dir)
 hl.window_rule({ match = { tag = "min_flying" }, no_anim = true })
 hl.window_rule({ match = { tag = "min_hidden" }, opacity = "0 override", no_anim = true })
 
+-- Scrim behind the dock while it has the keyboard: a faint tint with a light
+-- blur of everything behind it. Omarchy keeps blur switched off globally, so
+-- it is switched on only while the scrim is up and the user's own blur
+-- settings are put back afterwards.
+M.scrim_blur = { size = 2, passes = 1 }  -- light: text behind stays legible
+M.saved_blur = M.saved_blur or nil
+
+function M.scrim(on)
+  if on then
+    if not M.saved_blur then
+      M.saved_blur = {
+        enabled = hl.get_config("decoration.blur.enabled"),
+        size = hl.get_config("decoration.blur.size"),
+        passes = hl.get_config("decoration.blur.passes"),
+      }
+    end
+    hl.config({ decoration = { blur = { enabled = true, size = M.scrim_blur.size, passes = M.scrim_blur.passes } } })
+  elseif M.saved_blur then
+    local b = M.saved_blur
+    M.saved_blur = nil
+    hl.config({ decoration = { blur = { enabled = b.enabled and true or false, size = b.size, passes = b.passes } } })
+  end
+end
+
+hl.layer_rule({ match = { namespace = "omarchy-minimized-scrim" }, blur = true, animation = "fade" })
+
 -- The dock slides up from the bottom edge when it appears and back down when
 -- it goes.
 hl.layer_rule({ match = { namespace = "omarchy-minimized-tray" }, animation = "slide bottom" })
