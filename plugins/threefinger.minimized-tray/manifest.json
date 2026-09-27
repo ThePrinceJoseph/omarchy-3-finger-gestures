@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "threefinger.minimized-tray",
+  "name": "Minimized windows tray",
+  "version": "1.0.0",
+  "author": "Joey Morrison",
+  "description": "Bottom tray listing windows minimized with the three-finger swipe; click a tile or use the arrow keys to bring it back.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Tray.qml"
+  }
+}
