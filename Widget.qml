@@ -34,8 +34,8 @@ Panel {
 
   function get(key) { return root.setting(key, root.defaults[key]) }
 
-  // Sliders show a plain 0.00–1.00 scale in steps of 0.05, so a setting you
-  // liked is easy to remember and get back to. Each maps to the real config
+  // Sliders show a plain 0.00–1.00 scale (two decimals), so a setting you
+  // liked is easy to remember and get back to; click the number to type one. Each maps to the real config
   // range here; the recommended stop is where the default lands.
   //   follow  0 = the screen lags far behind your fingers (distance 900)
   //           1 = it sticks to them (distance 233); 0.60 = default 500
@@ -52,7 +52,7 @@ Panel {
     glide:  { rec: 0.50, toConfig: function(d) { return d <= 0 ? 0 : Math.round((1 + d * 7) * 10) / 10 },
               fromConfig: function(c) { return Number(c) <= 0 ? 0 : (Number(c) - 1) / 7 } }
   })
-  function snap(d) { return Math.max(0, Math.min(1, Math.round(d / 0.05) * 0.05)) }
+  function snap(d) { return Math.max(0, Math.min(1, Math.round(d * 100) / 100)) }
   function display(scale, key) { return root.snap(root.scales[scale].fromConfig(root.get(key))) }
 
   function save(patch) {
@@ -333,7 +333,8 @@ Panel {
             validator: RegularExpressionValidator { regularExpression: /^(0?\.[0-9]{0,2}|0|1(\.0{0,2})?)$/ }
             onAccepted: valueText.finishEdit(true)
             Keys.onEscapePressed: valueText.finishEdit(false)
-            onActiveFocusChanged: if (!activeFocus && valueText.editing) valueText.finishEdit(true)
+            // Clicking elsewhere cancels; only Enter commits.
+            onActiveFocusChanged: if (!activeFocus && valueText.editing) valueText.finishEdit(false)
           }
         }
       }
@@ -350,7 +351,7 @@ Panel {
         anchors.rightMargin: Style.space(6)
         minimum: 0
         maximum: 1
-        step: 0.05
+        step: 0.01
         value: row.value
         onReleased: function(v) { row.committed(root.snap(v)) }
       }
@@ -358,7 +359,8 @@ Panel {
       Item {
         id: marker
         readonly property real frac: row.recommended
-        readonly property real centreX: slider.x + slider.knobSize / 2 + frac * (slider.width - slider.knobSize)
+        // Same clamp PanelSlider uses for its knob, so the arrow sits under it.
+        readonly property real centreX: slider.x + Math.max(0, Math.min(slider.width - slider.knobSize, slider.width * frac - slider.knobSize / 2)) + slider.knobSize / 2
         // Keep the label inside the row: it hangs right of the arrow unless
         // that would run off the edge, then left.
         readonly property bool labelRight: centreX + Style.space(10) + markerLabel.implicitWidth < parent.width

@@ -9,8 +9,9 @@ Omarchy shell plugin:
 | **Three fingers down** | *Minimize* the focused window: it shrinks down into a tray along the bottom of the screen. |
 | **Three fingers up** | Bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. |
 
-The tray shows one tile per minimized window (a picture of the window, its app icon,
-title and a ✕) and only exists while something is minimized. Hover a tile to select
+The dock shows one tile per minimized window (a picture of the window, its app icon
+and title) and only exists while something is minimized. Hover a tile for a ✕ and a
+larger preview with the full title. Hover a tile to select
 it, click it to bring it back. When a tile lands, the tray takes the keyboard:
 **Left / Right** pick a tile, **Enter** brings it back, **Backspace** closes it,
 **Escape** (or Down, or SUPER+M) hands the keyboard back. **SUPER+M** hands it to the
@@ -81,9 +82,9 @@ Omarchy's window animation speed.
 - **Why 5, and at most 12.** Tiles share the screen width and titles shrink to fit: on a
   1280-wide screen five tiles keep about 22 characters of title, twelve are down to a
   picture and an icon.
-- **Thumbnails cost a moment.** The window is photographed before it starts to move,
-  which delays the shrink by 30 to 110 ms depending on window size. Turn thumbnails off
-  if you would rather have the instant start.
+- **The flight starts a moment late.** The window is photographed before its picture
+  takes off, which costs 30 to 110 ms depending on window size (larger windows take
+  longer to capture).
 - **A sloppy diagonal swipe** can be read as the other axis. If down/up misfire or feel
   too eager, add `scale = 1.5` (or another value) to those two `hl.gesture` lines in
   `gestures.lua`.
@@ -111,24 +112,26 @@ Omarchy ships with the workspace slide animation turned off, so the config turns
 on, which is what gives the glide after you let go. The SUPER+1..0 keys switch that
 animation off for a split second so keyboard switches stay instant.
 
-**Down: minimize.** Hyprland has no minimize, so `minimize.lua` fakes it. If thumbnails
-are on, `grim` photographs the window first. Then the window is floated and, in the same
-event, aimed at a short strip at the bottom edge; Hyprland animates the whole way, and
-neighbours re-tile in step. Once it lands, the window is moved to the hidden special
-workspace `minimized`. Special workspaces are invisible, skipped by the horizontal
-swipe, and separate from the SUPER+S scratchpad. (Simply moving a window to another
-workspace only fades it, which is why the float-and-shrink detour exists.)
+**Down: minimize.** Hyprland has no minimize, so `minimize.lua` fakes it. First `grim`
+photographs the window. Then the dock plugin animates that picture from the window's
+rectangle down into the tile it is about to occupy, while the real window, hidden and
+with its own animations off, slips into the hidden special workspace `minimized`.
+Nothing is ever resized: what you see moving is the picture, so the content never
+reflows mid-flight. Special workspaces are invisible, skipped by the horizontal swipe,
+and separate from the SUPER+S scratchpad.
 
 **The tray.** `Tray.qml` is an Omarchy shell panel that watches Hyprland's window list
 (`hyprctl clients -j`, refreshed on window events). When anything sits in the hidden
 workspace, it shows a bottom panel with one tile per window. Hovering or arrowing to a
 tile writes that window's address to `~/.local/state/omarchy/minimized-tray-selected`.
 
-**Up: restore.** The swipe-up handler reads that state file, picks that window, and puts
-the strip back on your current workspace. A tiled window is handed straight back to the
-layout, one motion from the tray into its slot; floating, maximized and fullscreen
-windows grow to their old geometry first and finalize once settled (Hyprland drops a
-maximize requested within ~150 ms of a workspace move).
+**Up: restore.** The swipe-up handler reads that state file and picks that window. The
+dock flies the picture from the tile back to where the window goes, while the real
+window arrives on your workspace invisible, takes its place in the layout (the dock is
+told the real spot so the picture lands exactly on it), and is revealed the moment the
+picture lands. Maximized and fullscreen windows are un-maximized for the trip and
+maximized again just before the reveal, because Hyprland hands a fullscreen state to a
+neighbour if a fullscreen window changes workspace.
 
 **The glue.** The minimize logic is a global Lua table (`Minimize`) inside Hyprland's
 own Lua runtime. The gestures call it directly, and the tray calls the same functions

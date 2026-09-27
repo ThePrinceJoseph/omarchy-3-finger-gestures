@@ -252,14 +252,46 @@ Item {
 
   Component.onCompleted: refresh()
 
-  // Sizes shared by the dock and the preview.
+  // Sizes shared by the dock, the preview and the flying proxy.
   readonly property int edge: Style.space(20)      // clearance to the screen sides
   readonly property int pad: Style.space(10)       // card padding
   readonly property int gap: Style.space(8)        // between tiles
   readonly property int maxTileWidth: Style.space(156)
+  readonly property int minTileWidth: Style.space(72)
   readonly property int bottomMargin: Style.space(10)
+  readonly property int thumbGap: Style.space(8)   // picture to label
+  readonly property int labelRowHeight: Style.space(18)
+  readonly property int labelGap: Style.space(6)   // label to dot
+  readonly property int dotSize: Style.space(5)
+  readonly property int frameRadius: Style.cornerRadius > 0 ? Style.space(8) : 0
 
   property var dockGeometry: ({ x: 0, width: 0, height: 0 })
+
+  function focusedScreen() {
+    var screens = Quickshell.screens
+    var name = Hyprland.focusedMonitor && Hyprland.focusedMonitor.name ? Hyprland.focusedMonitor.name : ""
+    for (var i = 0; i < screens.length; i++) if (screens[i] && screens[i].name === name) return screens[i]
+    return screens.length > 0 ? screens[0] : null
+  }
+  function tileWidthFor(n, screenWidth) {
+    n = Math.max(1, n)
+    var avail = screenWidth - 2 * root.edge - 2 * root.pad - (n - 1) * root.gap
+    return Math.max(root.minTileWidth, Math.min(root.maxTileWidth, Math.floor(avail / n)))
+  }
+  function thumbHeightFor(w) { return Math.round(w * 9 / 16) }
+  function tileHeightFor(w) { return (root.thumbnails ? thumbHeightFor(w) + root.thumbGap : 0) + root.labelRowHeight + root.labelGap + root.dotSize }
+  // Where tile <index> of <n> tiles sits on screen (its picture frame, or the
+  // whole tile when thumbnails are off), in that screen's logical coordinates.
+  function tileRect(index, n, scr) {
+    var sw = scr ? scr.width : 1280, sh = scr ? scr.height : 800
+    var w = tileWidthFor(n, sw)
+    var dockW = n * w + (n - 1) * root.gap + 2 * root.pad
+    var dockH = tileHeightFor(w) + 2 * root.pad
+    var dockX = Math.round((sw - dockW) / 2)
+    var dockY = sh - root.bottomMargin - dockH
+    var h = root.thumbnails ? thumbHeightFor(w) : tileHeightFor(w)
+    return { x: dockX + root.pad + index * (w + root.gap), y: dockY + root.pad, w: w, h: h }
+  }
 
   // One dock per screen; only the one on the focused screen takes the keyboard.
   Variants {
@@ -274,11 +306,7 @@ Item {
         if (!focused || !focused.name || !dock.screen || !dock.screen.name) return true
         return focused.name === dock.screen.name
       }
-      readonly property int tileWidth: {
-        var n = Math.max(1, root.windows.length)
-        var avail = (dock.screen ? dock.screen.width : 1280) - 2 * root.edge - 2 * root.pad - (n - 1) * root.gap
-        return Math.max(Style.space(72), Math.min(root.maxTileWidth, Math.floor(avail / n)))
-      }
+      readonly property int tileWidth: root.tileWidthFor(root.windows.length, dock.screen ? dock.screen.width : 1280)
       visible: root.windows.length > 0
       anchors { bottom: true }
       margins { bottom: root.bottomMargin }
@@ -302,7 +330,7 @@ Item {
         id: card
         width: tilesRow.width + 2 * root.pad
         height: tilesRow.height + 2 * root.pad
-        radius: Math.max(Style.cornerRadius, Style.space(14))
+        radius: Style.cornerRadius > 0 ? Math.max(Style.cornerRadius, Style.space(12)) : 0
         color: Util.alpha(Color.popups.background, 0.9)
         border.width: 1
         border.color: root.focusMode ? Util.alpha(Color.accent, 0.55) : Util.alpha(Color.popups.border, 0.35)
@@ -332,6 +360,7 @@ Item {
           id: tilesRow
           anchors.centerIn: parent
           spacing: root.gap
+          move: Transition { NumberAnimation { properties: "x"; duration: 220; easing.type: Easing.OutCubic } }
 
           Repeater {
             model: root.windows
@@ -343,9 +372,9 @@ Item {
               readonly property bool selected: index === root.selectedIndex
               readonly property bool hovered: index === root.hoverIndex
               readonly property bool showThumb: root.thumbnails
-              readonly property int thumbHeight: Math.round(dock.tileWidth * 9 / 16)
+              readonly property int thumbHeight: root.thumbHeightFor(dock.tileWidth)
               width: dock.tileWidth
-              height: (showThumb ? thumbHeight + Style.space(8) : 0) + labelRow.height + Style.space(6) + dot.height
+              height: root.tileHeightFor(dock.tileWidth)
 
               // Whole-tile handler, declared first so the ✕ sits above it.
               MouseArea {
@@ -368,7 +397,7 @@ Item {
                 visible: tile.showThumb
                 width: tile.width
                 height: tile.thumbHeight
-                radius: Style.space(8)
+                radius: root.frameRadius
                 color: Util.alpha(Color.bar.text, 0.06)
                 border.width: tile.selected ? 2 : 1
                 border.color: tile.selected ? Color.accent : Util.alpha(Color.bar.text, tile.hovered ? 0.35 : 0.14)
@@ -434,8 +463,8 @@ Item {
               // Icon + title under the picture.
               Item {
                 id: labelRow
-                anchors { left: parent.left; right: parent.right; top: tile.showThumb ? frame.bottom : parent.top; topMargin: tile.showThumb ? Style.space(8) : 0 }
-                height: Math.max(icon.height, title.implicitHeight)
+                anchors { left: parent.left; right: parent.right; top: tile.showThumb ? frame.bottom : parent.top; topMargin: tile.showThumb ? root.thumbGap : 0 }
+                height: root.labelRowHeight
                 Image {
                   id: icon
                   anchors { left: parent.left; leftMargin: Style.space(4); verticalCenter: parent.verticalCenter }
@@ -461,7 +490,7 @@ Item {
               Rectangle {
                 id: dot
                 anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom }
-                width: Style.space(5); height: width; radius: width / 2
+                width: root.dotSize; height: width; radius: width / 2
                 color: tile.selected ? Color.accent : Util.alpha(Color.bar.text, 0.3)
                 Behavior on color { ColorAnimation { duration: 120 } }
               }
@@ -531,7 +560,7 @@ Item {
         anchors { top: previewTitle.bottom; topMargin: Style.space(8); left: parent.left; leftMargin: root.pad }
         width: previewCard.imgW
         height: previewImage.height
-        radius: Style.space(8)
+        radius: root.frameRadius
         color: Util.alpha(Color.bar.text, 0.06)
         border.width: 1
         border.color: Util.alpha(Color.bar.text, 0.15)
@@ -549,8 +578,122 @@ Item {
     }
   }
 
+  // The flight: a picture of the window that shrinks from where the window
+  // was into its tile (minimize) or grows from the tile back to where the
+  // window goes (restore). minimize.lua drives it over IPC and swaps the real
+  // window in or out without animation underneath, so what you see moving is
+  // always this proxy.
+  property var flight: null   // { address, thumb, icon }
+  property bool flightOut: true
+
+  function startFlight(payload, out) {
+    var p
+    try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad flight payload: " + e); return "bad json" }
+    var scr = root.focusedScreen()
+    var addr = String(p.address || "")
+    var n = root.windows.length, idx = -1
+    for (var i = 0; i < n; i++) if (root.windows[i].address === addr) idx = i
+    if (out) { if (idx < 0) { idx = n; n = n + 1 } }
+    else if (idx < 0) return "not in dock"
+    var tileR = root.tileRect(idx, n, scr)
+    var winR = { x: Number(p.x) || 0, y: Number(p.y) || 0, w: Math.max(1, Number(p.w) || 1), h: Math.max(1, Number(p.h) || 1) }
+    var from = out ? winR : tileR, to = out ? tileR : winR
+    var entry = idx < root.windows.length ? root.windows[idx] : null
+    root.flightOut = out
+    root.flight = {
+      address: addr,
+      thumb: entry ? entry.thumb : ("file://" + root.thumbDir + "/" + addr.replace(/[^0-9a-zA-Z]/g, "") + ".jpg"),
+      icon: entry ? entry.icon : ""
+    }
+    flyWindow.screen = scr
+    flightAnim.stop()
+    proxy.x = from.x; proxy.y = from.y; proxy.width = from.w; proxy.height = from.h
+    proxy.opacity = 1
+    flyWindow.visible = true
+    flightAnim.toX = to.x; flightAnim.toY = to.y; flightAnim.toW = to.w; flightAnim.toH = to.h
+    flightAnim.start()
+    return "ok"
+  }
+
+  // Mid-flight retarget (a restored tiled window lands wherever the layout puts it).
+  function retargetFlight(payload) {
+    var p
+    try { p = JSON.parse(payload || "{}") } catch (e) { return "bad json" }
+    if (!root.flight || String(p.address || "") !== root.flight.address || !flightAnim.running) return "no flight"
+    flightAnim.stop()
+    flightAnim.toX = Number(p.x) || 0; flightAnim.toY = Number(p.y) || 0
+    flightAnim.toW = Math.max(1, Number(p.w) || 1); flightAnim.toH = Math.max(1, Number(p.h) || 1)
+    flightAnim.duration = 200
+    flightAnim.start()
+    flightAnim.duration = 320
+    return "ok"
+  }
+
+  function endFlight() { flightAnim.stop(); flyWindow.visible = false; root.flight = null }
+
+  PanelWindow {
+    id: flyWindow
+    visible: false
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-minimized-flight"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    mask: Region {}
+
+    Rectangle {
+      id: proxy
+      radius: root.frameRadius
+      color: Util.alpha(Color.popups.background, 0.96)
+      border.width: 1
+      border.color: Util.alpha(Color.accent, 0.7)
+      clip: true
+      Image {
+        id: proxyImage
+        anchors.fill: parent
+        anchors.margins: 1
+        source: root.flight ? root.flight.thumb : ""
+        cache: false
+        asynchronous: false
+        fillMode: Image.PreserveAspectCrop
+        smooth: true
+        visible: status === Image.Ready
+      }
+      Image {
+        anchors.centerIn: parent
+        width: Math.min(Style.space(48), parent.height * 0.6); height: width
+        source: root.flight ? root.flight.icon : ""
+        sourceSize: Qt.size(width, height)
+        visible: proxyImage.status !== Image.Ready && root.flight && root.flight.icon !== ""
+        opacity: 0.85
+      }
+    }
+
+    ParallelAnimation {
+      id: flightAnim
+      property real toX: 0
+      property real toY: 0
+      property real toW: 1
+      property real toH: 1
+      property int duration: 320
+      NumberAnimation { target: proxy; property: "x"; to: flightAnim.toX; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+      NumberAnimation { target: proxy; property: "y"; to: flightAnim.toY; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+      NumberAnimation { target: proxy; property: "width"; to: flightAnim.toW; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+      NumberAnimation { target: proxy; property: "height"; to: flightAnim.toH; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+      onFinished: flightSettle.restart()
+    }
+    // Hold the landed picture a moment so the real tile / window is there
+    // underneath before it goes.
+    Timer { id: flightSettle; interval: root.flightOut ? 120 : 60; onTriggered: root.endFlight() }
+  }
+
   IpcHandler {
     target: "minimized-tray"
+    function flyOut(payload: string): string { return root.startFlight(payload, true) }
+    function flyIn(payload: string): string { return root.startFlight(payload, false) }
+    function retarget(payload: string): string { return root.retargetFlight(payload) }
+    function endFlight(): string { root.endFlight(); return "ok" }
     function refresh(): string { root.refresh(); return "ok" }
     function count(): string { return String(root.windows.length) }
     function focus(): string { root.toggleFocus(); return root.focusMode ? "focused" : "unfocused" }

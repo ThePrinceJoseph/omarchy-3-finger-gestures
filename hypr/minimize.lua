@@ -1,18 +1,24 @@
 -- Omarchy 3 Finger Gestures: minimize windows with the touchpad.
 -- https://github.com/ThePrinceJoseph/omarchy-3-finger-gestures
 --
--- Minimize.minimize()        shrinks the focused window down toward the bottom
---                            edge, then tucks it into the hidden special
---                            workspace `special:minimized`.
+-- Minimize.minimize()        tucks the focused window into the hidden special
+--                            workspace `special:minimized`; the dock flies a
+--                            picture of it into its tile.
 -- Minimize.restore(address)  brings one window back onto the current
---                            workspace, growing up from the bottom edge.
--- Minimize.restore_selected() same, for the tile selected in the tray (hover or
---                            SUPER+M + arrows), falling back to the most
+--                            workspace; the dock flies the picture back out.
+-- Minimize.restore_selected() same, for the tile selected in the dock (hover or
+--                            the tray key + arrows), falling back to the most
 --                            recently minimized window.
 -- Minimize.restore_latest()  same, always the most recently minimized window.
+-- Minimize.restore_all()     everything at once. Minimize.shutdown() for uninstall.
 --
--- `Minimize` is a global on purpose: the tray plugin
--- (~/.config/omarchy/plugins/threefinger.minimized-tray/) calls it through
+-- How the animation works: the window itself is never resized. Its picture
+-- is taken (grim), then the dock plugin animates that picture between the
+-- window's rectangle and its tile (`omarchy-shell minimized-tray flyOut/flyIn`)
+-- while the real window is swapped out or in underneath with animations off
+-- (tags `min_flying`, `min_hidden`; see the rules at the bottom).
+--
+-- `Minimize` is a global on purpose: the dock plugin calls it through
 --   hyprctl dispatch "Minimize.restore('0x...')"
 -- The gestures that call it live in gestures.lua.
 
@@ -20,19 +26,21 @@ Minimize = Minimize or {}
 local M = Minimize
 
 M.workspace = "special:minimized"
-M.anim_ms = 380       -- ms the shrink/grow takes (Omarchy's `windows` animation speed, 3.79)
-M.tray_height = 40    -- logical px; gestures.lua sets it from settings and tells the tray
--- The tray writes the selected tile's address here; keep in sync with selectedPath there.
+M.anim_ms = 320       -- ms the picture takes to fly (matches the dock plugin's flight)
+M.tray_height = 40    -- logical px; gestures.lua sets it from settings and tells the dock
+-- The dock writes the selected tile's address here; keep in sync with selectedPath there.
 M.selected_path = os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-selected"
 M.stack = M.stack or {}   -- addresses, newest last
-M.saved = M.saved or {}   -- address -> geometry/state to put back on restore
-M.busy = M.busy or {}     -- address -> true while a minimize/restore animation runs
-M.max_windows = M.max_windows or 5  -- tray capacity, 1..12 (gestures.lua sets it from settings)
+M.saved = M.saved or {}   -- address -> geometry/state to fly back to on restore
+M.busy = M.busy or {}     -- address -> true while a flight runs
+M.max_windows = M.max_windows or 5  -- dock capacity, 1..12 (gestures.lua sets it from settings)
 M.op = M.op or {}         -- address -> operation token; bumped on close so stale timers do nothing
-M.pending = M.pending or 0          -- minimizes started but not yet landed in the tray
+M.pending = M.pending or 0          -- minimizes started but not yet landed in the dock
 M.shutting_down = false             -- set by M.shutdown(); refuses new minimizes
-M.thumbnails = M.thumbnails or false -- grab a picture of each window for its tray tile (gestures.lua sets it)
+M.thumbnails = M.thumbnails or false -- show the picture in the dock tile (gestures.lua sets it)
 M.thumb_dir = os.getenv("HOME") .. "/.cache/threefinger-tray"
+
+-- ------------------------------------------------------------------ helpers
 
 local function vec(v)
   if type(v) ~= "table" then return 0, 0 end
@@ -69,20 +77,48 @@ local function after(ms, fn)
   hl.timer(fn, { timeout = ms, type = "oneshot" })
 end
 
--- Where a window of the given geometry shrinks to: a short strip at the
--- bottom edge, centred under the window.
-local function tray_target(ax, sw, mon)
-  local tw = math.max(160, math.floor(sw * 0.4))
-  local th = M.tray_height
-  local tx = math.floor(ax + sw / 2 - tw / 2)
-  local ty = mon.y + mon.h - th
-  return tx, ty, tw, th
+-- Start a new operation on a window; timers compare their token to M.op[addr]
+-- and bail out if anything (a close, a newer operation) has moved on since.
+local function begin(addr)
+  M.op[addr] = (M.op[addr] or 0) + 1
+  return M.op[addr]
+end
+
+local function thumb_path(addr)
+  return M.thumb_dir .. "/" .. addr:gsub("[^%w]", "") .. ".jpg"
+end
+
+local function file_exists(path)
+  local f = io.open(path, "r")
+  if f then f:close() return true end
+  return false
+end
+
+local function rect_json(addr, x, y, w, h)
+  return string.format('{"address":"%s","x":%d,"y":%d,"w":%d,"h":%d}',
+    addr, math.floor(x), math.floor(y), math.floor(w), math.floor(h))
+end
+
+-- Talk to the dock plugin (omarchy-shell IPC target "minimized-tray").
+local function tray(method, payload)
+  if payload then
+    hl.exec_cmd(string.format("omarchy-shell minimized-tray %s %q", method, payload))
+  else
+    hl.exec_cmd("omarchy-shell minimized-tray " .. method)
+  end
+end
+
+local function tag(w, name, on)
+  hl.dispatch(hl.dsp.window.tag({ window = w, tag = (on and "+" or "-") .. name }))
+end
+
+local function notify(title, body)
+  hl.exec_cmd(string.format("notify-send -a '3 Finger Gestures' -t 2500 %q %q", title, body))
 end
 
 -- Hyprland throws its Lua state away on every config reload, so M.saved alone
--- is not enough: a window minimized before a reload would come back at a
--- default size and floating. The original state is therefore also written
--- onto the window itself as a tag (tags live in Hyprland and survive reloads):
+-- is not enough: the geometry to fly back to is also written onto the window
+-- as a tag (tags live in Hyprland and survive reloads):
 --   min_<floating 0/1>_<fullscreen 0/1/2>_<x>_<y>_<w>_<h>   (negatives as n123)
 local function encode_num(n)
   n = math.floor(n or 0)
@@ -105,40 +141,39 @@ local function state_from_tags(w)
   local tags = w and w.tags
   if type(tags) ~= "table" then return nil, nil end
   for _, raw in ipairs(tags) do
-    local tag = tostring(raw):gsub("%*$", "")
-    local fl, fs, x, y, ww, hh = tag:match("^min_(%d)_(%d)_(n?%d+)_(n?%d+)_(n?%d+)_(n?%d+)$")
+    local t = tostring(raw):gsub("%*$", "")
+    local fl, fs, x, y, ww, hh = t:match("^min_(%d)_(%d)_(n?%d+)_(n?%d+)_(n?%d+)_(n?%d+)$")
     if fl then
       return {
         floating = fl == "1",
         maximized = fs == "1",
         fullscreen = fs == "2",
         x = decode_num(x), y = decode_num(y), w = decode_num(ww), h = decode_num(hh),
-      }, tag
+      }, t
     end
   end
   return nil, nil
 end
 
-local function clear_state_tag(w)
-  local _, tag = state_from_tags(w)
-  if tag then hl.dispatch(hl.dsp.window.tag({ window = w, tag = "-" .. tag })) end
-end
-
--- Start a new operation on a window; timers compare their token to M.op[addr]
--- and bail out if anything (a close, a newer operation) has moved on since.
-local function begin(addr)
-  M.op[addr] = (M.op[addr] or 0) + 1
-  return M.op[addr]
-end
-
-local function thumb_path(addr)
-  return M.thumb_dir .. "/" .. addr:gsub("[^%w]", "") .. ".jpg"
-end
-
-local function file_exists(path)
-  local f = io.open(path, "r")
-  if f then f:close() return true end
+local function has_tag(w, name)
+  local tags = w and w.tags
+  if type(tags) ~= "table" then return false end
+  for _, raw in ipairs(tags) do
+    if tostring(raw):gsub("%*$", "") == name then return true end
+  end
   return false
+end
+
+local function clear_state_tag(w)
+  local _, t = state_from_tags(w)
+  if t then tag(w, t, false) end
+end
+
+-- Drop the flight/hidden tags and the saved-state tag from a window.
+local function clear_transient_tags(w)
+  clear_state_tag(w)
+  if has_tag(w, "min_flying") then tag(w, "min_flying", false) end
+  if has_tag(w, "min_hidden") then tag(w, "min_hidden", false) end
 end
 
 local function forget(addr)
@@ -151,43 +186,23 @@ local function forget(addr)
   end
 end
 
--- Put a window into its remembered end state: tiled or floating at its saved
--- geometry, maximized/fullscreen if it was, tag removed.
-local function apply_final_state(w, s)
-  clear_state_tag(w)
-  if s.floating == false then
-    hl.dispatch(hl.dsp.window.float({ window = w, action = "disable" }))
-  end
-  if s.maximized then
-    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "set", mode = "maximized" }))
-  elseif s.fullscreen then
-    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "set", mode = "fullscreen" }))
-  end
-end
-
--- Hyprland drops pending timers when the config reloads. A reload during the
--- shrink or grow animation leaves a tagged window floating outside the hidden
--- workspace, as a strip nobody can reach. On every load, put such windows
--- straight back where they belong (no animation).
+-- Hyprland drops pending timers when the config reloads. A reload during a
+-- flight can leave a window hidden (opacity 0) or tagged. On every load, make
+-- any such window on a visible workspace plain again; windows in the dock keep
+-- their state tag (restore needs it).
 local function recover_stranded()
   for _, w in ipairs(hl.get_windows() or {}) do
-    local s = state_from_tags(w)
-    if s and not M.busy[w.address] and not (w.workspace and w.workspace.name == M.workspace) then
-      local mon = monitor(w.monitor)
-      local sw = math.min(s.w or math.floor(mon.w * 0.6), mon.w)
-      local sh = math.min(s.h or math.floor(mon.h * 0.6), mon.h)
-      local ax = mon.x + math.max(0, math.min(s.x or 0, mon.w - sw))
-      local ay = mon.y + math.max(0, math.min(s.y or 0, mon.h - sh))
-      hl.dispatch(hl.dsp.window.resize({ window = w, x = sw, y = sh }))
-      hl.dispatch(hl.dsp.window.move({ window = w, x = ax, y = ay }))
-      apply_final_state(w, s)
+    if not M.busy[w.address] then
+      if has_tag(w, "min_flying") then tag(w, "min_flying", false) end
+      if has_tag(w, "min_hidden") then tag(w, "min_hidden", false) end
+      if not (w.workspace and w.workspace.name == M.workspace) and state_from_tags(w) then
+        clear_state_tag(w)
+      end
     end
   end
 end
 
-local function notify(title, body)
-  hl.exec_cmd(string.format("notify-send -a '3 Finger Gestures' -t 2500 %q %q", title, body))
-end
+-- ----------------------------------------------------------------- minimize
 
 function M.minimize(w)
   if M.shutting_down then return false end
@@ -211,8 +226,8 @@ function M.minimize(w)
   local ax, ay = vec(w.at)
   local sw, sh = vec(w.size)
   local mon = monitor()
-  -- Geometry is kept relative to the monitor, so a window can be restored on
-  -- whichever monitor is active at the time.
+  -- Geometry is kept relative to the monitor, so the picture can fly back
+  -- onto whichever monitor is active at the time.
   local state = {
     floating = w.floating,
     maximized = (w.fullscreen == 1),
@@ -221,142 +236,165 @@ function M.minimize(w)
   }
   M.saved[addr] = state
   clear_state_tag(w)
-  hl.dispatch(hl.dsp.window.tag({ window = w, tag = "+" .. state_tag(state) }))
+  tag(w, state_tag(state), true)
 
-  local function put_back(win)
-    hl.dispatch(hl.dsp.window.resize({ window = win, x = sw, y = sh }))
-    hl.dispatch(hl.dsp.window.move({ window = win, x = ax, y = ay }))
-    apply_final_state(win, state)
-  end
-
-  -- Once the window has landed on the strip, tuck it into the hidden workspace.
-  local function stash()
+  local function give_up()
     M.pending = math.max(0, M.pending - 1)
-    if M.op[addr] ~= token then return end
-    local w3 = find(addr)
-    if not w3 then forget(addr) return end
-    if M.shutting_down then
-      -- Uninstall started mid-animation: put it back instead of stashing it.
-      put_back(w3)
-      forget(addr)
-      return
+    local win = find(addr)
+    if win then
+      clear_transient_tags(win)
+      if state.maximized and win.fullscreen ~= 1 then
+        hl.dispatch(hl.dsp.window.fullscreen({ window = win, action = "set", mode = "maximized" }))
+      elseif state.fullscreen and win.fullscreen ~= 2 then
+        hl.dispatch(hl.dsp.window.fullscreen({ window = win, action = "set", mode = "fullscreen" }))
+      end
     end
-    hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
-    table.insert(M.stack, addr)
-    M.busy[addr] = nil
+    tray("endFlight")
+    forget(addr)
   end
 
-  local function start_animation()
+  -- Send it to the hidden workspace with animations off: the flying picture
+  -- is what the eye follows.
+  -- The picture now covers the window exactly, so the real one can vanish
+  -- (opacity 0, no animation), drop any maximize/fullscreen (a fullscreen
+  -- window must never change workspace: Hyprland hands the state to a
+  -- neighbour) and slip into the hidden workspace unseen.
+  local function stash()
     local win = find(addr)
     if M.op[addr] ~= token or not win then M.pending = math.max(0, M.pending - 1) return end
-    if M.shutting_down then M.pending = math.max(0, M.pending - 1) forget(addr) return end
-    -- Let go of maximize/fullscreen, float the window and, in the same breath,
-    -- aim it at the tray strip: Hyprland animates from where the window is now
-    -- straight to the strip, and the neighbours re-tile in step with it.
-    if win.fullscreen == 1 then
-      hl.dispatch(hl.dsp.window.fullscreen({ window = win, action = "unset", mode = "maximized" }))
-    elseif win.fullscreen == 2 then
-      hl.dispatch(hl.dsp.window.fullscreen({ window = win, action = "unset", mode = "fullscreen" }))
-    end
-    if not win.floating then
-      hl.dispatch(hl.dsp.window.float({ window = win, action = "enable" }))
-    end
-    local tx, ty, tw, th = tray_target(ax, sw, mon)
-    -- resize first: Hyprland keeps the centre on resize, then move pins the spot
-    hl.dispatch(hl.dsp.window.resize({ window = win, x = tw, y = th }))
-    hl.dispatch(hl.dsp.window.move({ window = win, x = tx, y = ty }))
-    after(M.anim_ms, stash)
+    if M.shutting_down then give_up() return end
+    tag(win, "min_flying", true)
+    tag(win, "min_hidden", true)
+    after(20, function()
+      local w2 = find(addr)
+      if M.op[addr] ~= token or not w2 then M.pending = math.max(0, M.pending - 1) return end
+      if M.shutting_down then give_up() return end
+      if w2.fullscreen == 1 then
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "unset", mode = "maximized" }))
+      elseif w2.fullscreen == 2 then
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "unset", mode = "fullscreen" }))
+      end
+      after(20, function()
+        local w3 = find(addr)
+        if M.op[addr] ~= token or not w3 then M.pending = math.max(0, M.pending - 1) return end
+        if M.shutting_down then give_up() return end
+        hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
+        table.insert(M.stack, addr)
+        M.pending = math.max(0, M.pending - 1)
+        after(M.anim_ms + 200, function()
+          if M.op[addr] ~= token then return end
+          local w4 = find(addr)
+          if w4 then tag(w4, "min_flying", false) tag(w4, "min_hidden", false) end
+          M.busy[addr] = nil
+        end)
+      end)
+    end)
   end
 
-  -- Thumbnail: ask grim for a small picture of the window as it is now, and
-  -- start the animation as soon as the file exists (grim grabs its frame
-  -- before it writes, so the picture is never mid-shrink). Waiting is capped
-  -- at ~160 ms so a slow capture cannot stall the gesture.
-  if M.thumbnails then
-    local file = thumb_path(addr)
-    os.remove(file)
-    hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.3 -t jpeg -q 80 %q", M.thumb_dir, ax, ay, sw, sh, file))
-    local tries = 0
-    local function wait_for_thumb()
-      tries = tries + 1
-      if file_exists(file) or tries >= 8 then start_animation() else after(20, wait_for_thumb) end
-    end
-    after(20, wait_for_thumb)
-  else
-    start_animation()
+  local function start_flight()
+    if M.op[addr] ~= token or not find(addr) then M.pending = math.max(0, M.pending - 1) return end
+    if M.shutting_down then give_up() return end
+    tray("flyOut", rect_json(addr, ax, ay, sw, sh))
+    stash()
   end
+
+  -- Picture: ask grim for a small image of the window as it is now, and start
+  -- the flight as soon as the file exists (grim grabs its frame before it
+  -- writes, so the picture is never stale). Waiting is capped at ~160 ms so
+  -- a slow capture cannot stall the gesture.
+  local file = thumb_path(addr)
+  os.remove(file)
+  hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.3 -t jpeg -q 80 %q",
+    M.thumb_dir, ax, ay, sw, sh, file))
+  local tries = 0
+  local function wait_for_thumb()
+    tries = tries + 1
+    if file_exists(file) or tries >= 8 then start_flight() else after(20, wait_for_thumb) end
+  end
+  after(20, wait_for_thumb)
   return true
 end
 
+-- ------------------------------------------------------------------ restore
+
 function M.restore(addr)
-  if M.busy[addr] then return false end -- an animation is already running on it
+  if M.busy[addr] then return false end -- a flight is already running on it
   local w = find(addr)
   if not w then forget(addr) return false end
   if not (w.workspace and w.workspace.name == M.workspace) then forget(addr) return false end
   M.busy[addr] = true
   local token = begin(addr)
-  local tagged = state_from_tags(w)
-  -- Prefer what is stored on the window (survives reloads), then our table.
-  -- With neither, assume a tiled window of a sensible centred size.
-  local s = tagged or M.saved[addr] or { floating = false }
-  if s.floating == nil then s.floating = false end
+  local s = state_from_tags(w) or M.saved[addr] or {}
   local mon = monitor()
   local target = current_workspace()
-  -- Saved geometry is monitor-relative; fit it onto the monitor we restore to.
+  -- Where the picture flies to: the saved geometry (monitor-relative), fitted
+  -- onto the monitor we restore to. A tiled window lands wherever the layout
+  -- puts it; the dock is told the real spot as soon as Hyprland knows it.
   local sw = math.min(s.w or math.floor(mon.w * 0.6), mon.w)
   local sh = math.min(s.h or math.floor(mon.h * 0.6), mon.h)
   local rx = s.x or math.floor((mon.w - sw) / 2)
   local ry = s.y or math.floor((mon.h - sh) / 2)
   local ax = mon.x + math.max(0, math.min(rx, mon.w - sw))
   local ay = mon.y + math.max(0, math.min(ry, mon.h - sh))
-  local tx, ty, tw, th = tray_target(ax, sw, mon)
-
-  -- Start as a strip at the bottom edge on the current workspace...
-  if not w.floating then
-    hl.dispatch(hl.dsp.window.float({ window = w, action = "enable" }))
-  end
-  hl.dispatch(hl.dsp.window.resize({ window = w, x = tw, y = th }))
-  hl.dispatch(hl.dsp.window.move({ window = w, x = tx, y = ty }))
-  hl.dispatch(hl.dsp.window.move({ window = w, workspace = target, follow = true }))
   for i = #M.stack, 1, -1 do
     if M.stack[i] == addr then table.remove(M.stack, i) end
   end
 
-  -- ...then, next tick, one motion to where it belongs. A tiled window goes
-  -- straight back into the layout (Hyprland animates the strip into its slot,
-  -- and the neighbours make room at the same time); a floating one grows to
-  -- its saved geometry.
-  after(30, function()
-    if M.op[addr] ~= token then return end
+  -- The picture takes off from the tile; the real window arrives on the
+  -- workspace invisible (opacity 0, no animation), takes its place in the
+  -- layout, and is revealed the moment the picture lands on it.
+  tray("flyIn", rect_json(addr, ax, ay, sw, sh))
+  tag(w, "min_hidden", true)
+  tag(w, "min_flying", true)
+  after(20, function()
     local w2 = find(addr)
-    if not w2 then forget(addr) return end
-    local big = s.maximized or s.fullscreen
-    if s.floating or big then
-      -- Floating windows grow to their saved geometry. Maximized/fullscreen
-      -- ones grow to full size the same way: Hyprland drops a maximize that
-      -- is requested within ~150 ms of a workspace move, so the real
-      -- maximize waits for the end (where it changes nothing visible).
-      hl.dispatch(hl.dsp.window.resize({ window = w2, x = sw, y = sh }))
+    if M.op[addr] ~= token or not w2 then return end
+    hl.dispatch(hl.dsp.window.move({ window = w2, workspace = target, follow = true }))
+    if s.floating then
       hl.dispatch(hl.dsp.window.move({ window = w2, x = ax, y = ay }))
-    else
-      -- Tiled: hand it straight to the layout, one motion from strip to slot.
-      apply_final_state(w2, s)
+    end
+    local big = s.maximized or s.fullscreen
+    -- Tell the dock where a tiled window really ended up. (A maximized one
+    -- flies to the full-size rectangle it was saved with.)
+    if not big then
+      after(160, function()
+        local w3 = find(addr)
+        if M.op[addr] ~= token or not w3 then return end
+        local x, y = vec(w3.at)
+        local ww, hh = vec(w3.size)
+        if ww > 0 and hh > 0 then tray("retarget", rect_json(addr, x, y, ww, hh)) end
+      end)
+    end
+    -- Maximize/fullscreen again just before the reveal: it was dropped before
+    -- the trip out, and Hyprland ignores the request too soon after a
+    -- workspace move.
+    if big then
+      after(M.anim_ms - 40, function()
+        local w3 = find(addr)
+        if M.op[addr] ~= token or not w3 then return end
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w3, action = "set", mode = s.maximized and "maximized" or "fullscreen" }))
+      end)
     end
     after(M.anim_ms, function()
       if M.op[addr] ~= token then return end
-      local w3 = find(addr)
-      if not w3 then forget(addr) return end
-      if s.floating then clear_state_tag(w3) elseif big then apply_final_state(w3, s) end
-      os.remove(thumb_path(addr))
-      M.saved[addr] = nil
-      M.busy[addr] = nil
+      local w4 = find(addr)
+      if not w4 then forget(addr) return end
+      tag(w4, "min_hidden", false)
+      after(80, function()
+        if M.op[addr] ~= token then return end
+        local w5 = find(addr)
+        if w5 then clear_state_tag(w5) tag(w5, "min_flying", false) end
+        os.remove(thumb_path(addr))
+        M.saved[addr] = nil
+        M.busy[addr] = nil
+      end)
     end)
   end)
   return true
 end
 
 -- Hyprland reuses window addresses, so drop what we remember about a window
--- as soon as it closes (e.g. closed from the tray while minimized).
+-- as soon as it closes (e.g. closed from the dock while minimized).
 hl.on("window.close", function(w)
   if w and w.address then forget(w.address) end
 end)
@@ -398,24 +436,29 @@ function M.restore_selected()
   return M.restore_latest()
 end
 
--- Restore everything in the tray at once.
+-- Restore everything in the dock at once.
 function M.restore_all()
   for _, w in ipairs(hl.get_workspace_windows(M.workspace)) do M.restore(w.address) end
 end
 
 -- Used by uninstall.sh: stop taking new windows, bring back everything in the
--- tray, and put back anything caught mid-animation (its timers see the flag).
--- Windows tagged but idle outside the tray (a reload interrupted them) are
--- handled by recover_stranded's next pass, which shutdown runs right away.
+-- dock, and let anything caught mid-flight finish (its timers see the flag);
+-- then make sure no window is left hidden or tagged.
 function M.shutdown()
   M.shutting_down = true
   M.restore_all()
-  recover_stranded()
+  after(M.anim_ms + 300, recover_stranded)
 end
 
 -- Runs shortly after each config load, once windows are known.
 hl.timer(recover_stranded, { timeout = 300, type = "oneshot" })
 
--- The tray slides up from the bottom edge when it appears and back down when
+-- A window in flight swaps in or out without Hyprland's own animation (the
+-- dock's picture is what moves); a hidden one has already arrived but waits,
+-- invisible, for the picture to land on it.
+hl.window_rule({ match = { tag = "min_flying" }, no_anim = true })
+hl.window_rule({ match = { tag = "min_hidden" }, opacity = "0 override", no_anim = true })
+
+-- The dock slides up from the bottom edge when it appears and back down when
 -- it goes.
 hl.layer_rule({ match = { namespace = "omarchy-minimized-tray" }, animation = "slide bottom" })
