@@ -1,5 +1,5 @@
 -- Omarchy 3 Finger Gestures: minimize windows with the touchpad.
--- https://github.com/joeymorrison95/omarchy-3-finger-gestures
+-- https://github.com/ThePrinceJoseph/omarchy-3-finger-gestures
 --
 -- Minimize.minimize()        shrinks the focused window down toward the bottom
 --                            edge, then tucks it into the hidden special

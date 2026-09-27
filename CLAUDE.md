@@ -1,6 +1,6 @@
 # Omarchy 3 Finger Gestures
 
-Public GitHub repo (github.com/joeymorrison95/omarchy-3-finger-gestures): the
+Public GitHub repo (github.com/ThePrinceJoseph/omarchy-3-finger-gestures): the
 shareable version of the three-finger touchpad gestures built in
 `../laptop-setup/` (workspace swipe, minimize-to-tray, restore).
 

@@ -27,7 +27,7 @@ are un-maximized for the animation and re-maximized when they come back.
 ## Install
 
 ```bash
-git clone https://github.com/joeymorrison95/omarchy-3-finger-gestures.git
+git clone https://github.com/ThePrinceJoseph/omarchy-3-finger-gestures.git
 cd omarchy-3-finger-gestures
 ./install.sh
 ```

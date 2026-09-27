@@ -1,5 +1,5 @@
 -- Omarchy 3 Finger Gestures
--- https://github.com/joeymorrison95/omarchy-3-finger-gestures
+-- https://github.com/ThePrinceJoseph/omarchy-3-finger-gestures
 --
 -- Three-finger touchpad gestures for Omarchy 4 (Hyprland 0.56, Lua config):
 --   left / right  change workspace, gliding with your fingers
