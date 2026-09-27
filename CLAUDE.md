@@ -13,9 +13,9 @@ shareable version of the three-finger touchpad gestures built in
 
 ## Rules
 
-- This repo is the packaged copy. The laptop's own config in `~/.config/hypr/`
-  (input.lua, minimize.lua, bindings.lua) and the `joey.minimized-tray` plugin
-  are the originals; when they change, port the change here and vice versa.
+- This repo is the single source of truth. The laptop runs it via `./install.sh`
+  (files land in `~/.config/hypr/` and `~/.config/omarchy/plugins/threefinger.minimized-tray/`).
+  Edit here, run the installer, commit and push; never edit the installed copies directly.
 - Test changes with the install script on this machine, then `hyprctl configerrors`
   and `quickshell log -p /usr/share/omarchy/shell -t 40` for the tray.
 - Keep README's settings table in step with the `opt` table.
