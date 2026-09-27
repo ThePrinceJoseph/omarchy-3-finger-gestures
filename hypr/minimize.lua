@@ -177,7 +177,8 @@ function M.minimize(w)
   if M.max_windows and M.max_windows > 0 then
     local stashed = #hl.get_workspace_windows(M.workspace) + M.pending
     if stashed >= M.max_windows then
-      notify("Tray is full", "Bring a window back before minimizing another (" .. M.max_windows .. " max).")
+      notify("Tray is full: " .. M.max_windows .. " windows max",
+        "Bring one back first, or change tray_max in ~/.config/hypr/gestures-settings.lua")
       return false
     end
   end
