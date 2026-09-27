@@ -28,7 +28,6 @@ fullscreen windows come back maximized and fullscreen.
   shell (Quickshell). Built and tested on Omarchy 4.0.4 / Hyprland 0.56.2.
 - A touchpad that reports three fingers. Check with `python3 check-touchpad.py`
   (needs `sudo` or membership of the `input` group).
-- `grim` for thumbnails (Omarchy ships it).
 
 ## Install
 
@@ -91,8 +90,7 @@ Omarchy's window animation speed.
   1280-wide screen five tiles keep about 22 characters of title, twelve are down to a
   picture and an icon.
 - **The flight starts a moment late.** The window is photographed before its picture
-  takes off, which costs 30 to 110 ms depending on window size (larger windows take
-  longer to capture).
+  takes off, which costs a few tens of milliseconds.
 - **A sloppy diagonal swipe** can be read as the other axis. If down/up misfire or feel
   too eager, add `scale = 1.5` (or another value) to those two `hl.gesture` lines in
   `gestures.lua`.
@@ -127,8 +125,9 @@ Omarchy ships with the workspace slide animation turned off, so the config turns
 on, which is what gives the glide after you let go. The SUPER+1..0 keys switch that
 animation off for a split second so keyboard switches stay instant.
 
-**Down: minimize.** Hyprland has no minimize, so `minimize.lua` fakes it. First `grim`
-photographs the window. Then the dock plugin animates that picture from the window's
+**Down: minimize.** Hyprland has no minimize, so `minimize.lua` fakes it. First the dock
+photographs the window through the compositor's own window export, so the picture is the
+window's buffer alone with nothing that happened to overlap it. Then the dock plugin animates that picture from the window's
 rectangle down into the tile it is about to occupy, while the real window, hidden and
 with its own animations off, slips into the hidden special workspace `minimized`.
 Nothing is ever resized: what you see moving is the picture, so the content never

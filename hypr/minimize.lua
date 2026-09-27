@@ -13,7 +13,7 @@
 -- Minimize.restore_all()     everything at once. Minimize.shutdown() for uninstall.
 --
 -- How the animation works: the window itself is never resized. Its picture
--- is taken (grim), then the dock plugin animates that picture between the
+-- is taken (the dock captures the window's buffer), then the dock plugin animates that picture between the
 -- window's rectangle and its tile (`omarchy-shell minimized-tray flyOut/flyIn`)
 -- while the real window is swapped out or in underneath with animations off
 -- (tags `min_flying`, `min_hidden`; see the rules at the bottom).
@@ -341,20 +341,19 @@ function M.minimize(w)
     stash()
   end
 
-  -- Picture: ask grim for an image of the window as it is now (0.7 of the
-  -- output's pixels: sharp in the preview, cheap enough to encode) and start
-  -- the flight as soon as the file exists (grim grabs its frame before it
-  -- writes, so the picture is never stale). Waiting is capped at ~160 ms so
-  -- a slow capture cannot stall the gesture.
+  -- Picture: ask the dock to capture the window's own buffer through the
+  -- compositor (nothing overlapping it ends up in the picture), and start
+  -- the flight as soon as the file exists. Waiting is capped at ~200 ms so a
+  -- slow capture cannot stall the gesture; the flight then flies a plain
+  -- card with the icon.
   local file = thumb_path(addr)
   os.remove(file)
-  -- grim writes to a temporary name; the rename makes the file appear whole.
-  hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.7 -t jpeg -q 85 %q && mv -f %q %q",
-    M.thumb_dir, ax, ay, sw, sh, file .. ".part", file .. ".part", file))
+  hl.exec_cmd(string.format("mkdir -p %q && omarchy-shell minimized-tray capture %q %q %d %d",
+    M.thumb_dir, addr, file, math.floor(sw), math.floor(sh)))
   local tries = 0
   local function wait_for_thumb()
     tries = tries + 1
-    if file_exists(file) or tries >= 8 then start_flight() else after(20, wait_for_thumb) end
+    if file_exists(file) or tries >= 10 then start_flight() else after(20, wait_for_thumb) end
   end
   after(20, wait_for_thumb)
   return true

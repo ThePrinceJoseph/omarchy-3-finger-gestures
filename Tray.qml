@@ -445,8 +445,10 @@ Item {
                   anchors { top: parent.top; right: parent.right; margins: Style.space(5) }
                   width: Style.space(20); height: width; radius: width / 2
                   readonly property bool hot: closeMouse.containsMouse
-                  // Mouse only: with the keyboard, Backspace closes the selected tile.
-                  visible: tile.hovered
+                  // Mouse only (Backspace closes the selected tile from the keyboard); fades with the hover.
+                  opacity: tile.hovered ? 1 : 0
+                  Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                  enabled: opacity > 0.5
                   color: hot ? Util.alpha(Color.urgent, 0.85) : Util.alpha(Color.popups.background, 0.85)
                   border.width: 1
                   border.color: Util.alpha(Color.foreground, hot ? 0.6 : 0.3)
@@ -454,6 +456,7 @@ Item {
                   MouseArea {
                     id: closeMouse
                     anchors.fill: parent
+                    enabled: closeButton.enabled
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onEntered: root.hoverTile(tile.index)
@@ -503,79 +506,93 @@ Item {
     }
   }
 
-  // Larger preview above the hovered tile: the full title and a bigger picture.
-  PanelWindow {
-    id: preview
-    readonly property var entry: (root.previewIndex >= 0 && root.previewIndex < root.windows.length) ? root.windows[root.previewIndex] : null
-    readonly property int tileW: root.dockGeometry.width > 0 && root.windows.length > 0
-      ? Math.floor((root.dockGeometry.width - 2 * root.pad - (root.windows.length - 1) * root.gap) / root.windows.length) : 0
-    readonly property int tileCentre: root.dockGeometry.x + root.pad + root.previewIndex * (tileW + root.gap) + tileW / 2
-    readonly property int screenW: screen ? screen.width : 1280
-    visible: entry !== null && root.thumbnails
-    anchors { bottom: true; left: true }
-    margins {
-      bottom: root.bottomMargin + root.dockGeometry.height + Style.space(10)
-      left: Math.max(root.edge, Math.min(screenW - root.edge - previewCard.width, tileCentre - previewCard.width / 2))
-    }
-    implicitWidth: previewCard.width
-    implicitHeight: previewCard.height
-    color: "transparent"
-    exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.namespace: "omarchy-minimized-preview"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-    mask: Region {}
+  // Larger preview right above the hovered tile: the full title and a bigger
+  // picture. Drawn on a full-screen transparent surface so it can be placed
+  // by exact coordinates; fades in and out.
+  readonly property var previewEntry: (previewIndex >= 0 && previewIndex < windows.length) ? windows[previewIndex] : null
+  property var lastPreviewEntry: null
+  onPreviewEntryChanged: if (previewEntry) lastPreviewEntry = previewEntry
 
-    Rectangle {
-      id: previewCard
-      readonly property int imgW: Style.space(300)
-      width: imgW + 2 * root.pad
-      height: previewTitle.height + Style.space(8) + previewImage.height + 2 * root.pad
-      radius: Style.space(12)
-      color: Util.alpha(Color.popups.background, 0.94)
-      border.width: 1
-      border.color: Util.alpha(Color.popups.border, 0.5)
+  Variants {
+    model: Quickshell.screens
 
-      Row {
-        id: previewTitle
-        anchors { top: parent.top; left: parent.left; right: parent.right; margins: root.pad }
-        height: Style.space(20)
-        spacing: Style.space(8)
-        Image {
-          anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(18); height: width
-          source: preview.entry ? preview.entry.icon : ""
-          sourceSize: Qt.size(width, height)
-        }
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          width: previewTitle.width - Style.space(26)
-          text: preview.entry ? preview.entry.title : ""
-          color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          elide: Text.ElideRight
-          textFormat: Text.PlainText
-        }
+    PanelWindow {
+      id: previewWindow
+      required property var modelData
+      screen: modelData
+      readonly property bool mine: {
+        var focused = Hyprland.focusedMonitor
+        if (!focused || !focused.name || !previewWindow.screen || !previewWindow.screen.name) return true
+        return focused.name === previewWindow.screen.name
       }
+      readonly property bool wanted: root.previewEntry !== null && root.thumbnails && mine
+      visible: wanted || previewCard.opacity > 0.01
+      anchors { top: true; bottom: true; left: true; right: true }
+      color: "transparent"
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.namespace: "omarchy-minimized-preview"
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+      mask: Region {}
+
       Rectangle {
-        anchors { top: previewTitle.bottom; topMargin: Style.space(8); left: parent.left; leftMargin: root.pad }
-        width: previewCard.imgW
-        height: previewImage.height
-        radius: root.frameRadius
-        color: Util.alpha(Color.bar.text, 0.06)
+        id: previewCard
+        readonly property var entry: root.previewEntry || root.lastPreviewEntry
+        readonly property int imgW: Math.min(Style.space(520), Math.round(previewWindow.width * 0.42))
+        readonly property var tileR: root.tileRect(Math.max(0, root.previewIndex), Math.max(1, root.windows.length), previewWindow.screen)
+        width: imgW + 2 * root.pad
+        height: previewTitle.height + Style.space(8) + previewImage.height + 2 * root.pad
+        // Centred over the tile, kept inside the screen, sitting just above the dock.
+        x: Math.max(root.edge, Math.min(previewWindow.width - root.edge - width, tileR.x + tileR.w / 2 - width / 2))
+        y: tileR.y - root.pad - Style.space(10) - height
+        radius: Style.cornerRadius > 0 ? Style.space(12) : 0
+        color: Util.alpha(Color.popups.background, 0.96)
         border.width: 1
-        border.color: Util.alpha(Color.bar.text, 0.15)
-        Image {
-          id: previewImage
-          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 2 }
-          height: status === Image.Ready && implicitWidth > 0 ? Math.round((width) * implicitHeight / implicitWidth) : Math.round(width * 9 / 16)
-          source: preview.entry ? preview.entry.thumb : ""
-          cache: false
-          asynchronous: true
-          fillMode: Image.PreserveAspectFit
-          smooth: true
+        border.color: Util.alpha(Color.popups.border, 0.5)
+        opacity: previewWindow.wanted ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+        Row {
+          id: previewTitle
+          anchors { top: parent.top; left: parent.left; right: parent.right; margins: root.pad }
+          height: Style.space(20)
+          spacing: Style.space(8)
+          Image {
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(18); height: width
+            source: previewCard.entry ? previewCard.entry.icon : ""
+            sourceSize: Qt.size(width, height)
+          }
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            width: previewTitle.width - Style.space(26)
+            text: previewCard.entry ? previewCard.entry.title : ""
+            color: Color.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+          }
+        }
+        Rectangle {
+          anchors { top: previewTitle.bottom; topMargin: Style.space(8); left: parent.left; leftMargin: root.pad }
+          width: previewCard.imgW
+          height: previewImage.height
+          radius: root.frameRadius
+          color: Util.alpha(Color.bar.text, 0.06)
+          border.width: 1
+          border.color: Util.alpha(Color.bar.text, 0.15)
+          Image {
+            id: previewImage
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 2 }
+            height: status === Image.Ready && implicitWidth > 0 ? Math.round(width * implicitHeight / implicitWidth) : Math.round(width * 9 / 16)
+            source: previewCard.entry ? previewCard.entry.thumb : ""
+            cache: false
+            asynchronous: true
+            fillMode: Image.PreserveAspectFit
+            smooth: true
             mipmap: true
+          }
         }
       }
     }
@@ -722,8 +739,97 @@ Item {
     }
   }
 
+  // Window capture through the compositor's toplevel export: the window's own
+  // buffer, so nothing overlapping it (the dock, a flight) ends up in the
+  // picture. minimize.lua asks for it over IPC and waits for the file.
+  property var captureQueue: []
+  property var capturing: null   // { address, path, toplevel }
+
+  function toplevelFor(address) {
+    var addr = String(address || "").toLowerCase().replace(/^0x/, "")
+    var t = Hyprland.toplevels.values
+    for (var i = 0; i < t.length; i++) {
+      var a = String(t[i].address || "").toLowerCase().replace(/^0x/, "")
+      if (a === addr) return t[i].wayland || null
+    }
+    return null
+  }
+
+  function requestCapture(address, path, w, h) {
+    var tl = root.toplevelFor(address)
+    if (!tl) return "no toplevel for " + address
+    root.captureQueue = root.captureQueue.concat([{ address: address, path: path, toplevel: tl, w: Math.max(1, Number(w) || 1), h: Math.max(1, Number(h) || 1) }])
+    root.nextCapture()
+    return "ok"
+  }
+
+  function nextCapture() {
+    if (root.capturing || root.captureQueue.length === 0) return
+    var job = root.captureQueue[0]
+    root.captureQueue = root.captureQueue.slice(1)
+    root.capturing = job
+    // The view takes the window's own size, so the grab is the window and
+    // nothing else; the grab itself happens at the screen's pixel density.
+    captureView.width = job.w
+    captureView.height = job.h
+    captureView.captureSource = job.toplevel
+    captureTimeout.restart()
+  }
+
+  function finishCapture(ok) {
+    captureTimeout.stop()
+    captureView.captureSource = null
+    var job = root.capturing
+    root.capturing = null
+    if (job) root.log("capture " + (ok ? "saved " : "FAILED ") + job.path)
+    root.nextCapture()
+  }
+
+  Timer { id: captureTimeout; interval: 400; onTriggered: root.finishCapture(false) }
+
+  PanelWindow {
+    id: captureWindow
+    visible: root.capturing !== null
+    // Off-screen-ish: 1x1 at the top-left, no input, on the overlay layer.
+    anchors { top: true; left: true }
+    implicitWidth: 1
+    implicitHeight: 1
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-minimized-capture"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    mask: Region {}
+
+    ScreencopyView {
+      id: captureView
+      live: false
+      paintCursor: false
+      width: 1
+      height: 1
+      x: -width
+      onHasContentChanged: {
+        if (!hasContent || !root.capturing) return
+        var job = root.capturing
+        captureView.grabToImage(function(result) {
+          // Write to a temporary name and rename, so a reader never sees a
+          // half-written file.
+          var part = job.path + ".part.jpg"
+          var ok = result && result.saveToFile(part)
+          if (ok === true) Quickshell.execDetached(["mv", "-f", part, job.path])
+          root.finishCapture(ok === true)
+        })
+      }
+    }
+  }
+
   IpcHandler {
     target: "minimized-tray"
+    function capture(address: string, path: string, w: int, h: int): string { return root.requestCapture(address, path, w, h) }
+    function toplevels(): string {
+      var t = Hyprland.toplevels.values, w = ToplevelManager.toplevels.values
+      return "hypr=" + t.length + " wayland=" + w.length + (t.length ? " first=" + t[0].address + " linked=" + (t[0].wayland ? "yes" : "no") : "")
+    }
     function flyOut(payload: string): string { return root.startFlight(payload, true) }
     function flyIn(payload: string): string { return root.startFlight(payload, false) }
     function retarget(payload: string): string { return root.retargetFlight(payload) }
