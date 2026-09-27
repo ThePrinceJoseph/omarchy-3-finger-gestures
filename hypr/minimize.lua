@@ -133,11 +133,13 @@ function M.minimize(w)
   local ax, ay = vec(w.at)
   local sw, sh = vec(w.size)
   local mon = monitor()
+  -- Geometry is kept relative to the monitor, so a window can be restored on
+  -- whichever monitor is active at the time.
   local state = {
     floating = w.floating,
     maximized = (w.fullscreen == 1),
     fullscreen = (w.fullscreen == 2),
-    x = ax, y = ay, w = sw, h = sh,
+    x = ax - mon.x, y = ay - mon.y, w = sw, h = sh,
   }
   M.saved[addr] = state
   clear_state_tag(w)
@@ -188,10 +190,13 @@ function M.restore(addr)
   if s.floating == nil then s.floating = false end
   local mon = monitor()
   local target = current_workspace()
-  local sw = s.w or math.floor(mon.w * 0.6)
-  local sh = s.h or math.floor(mon.h * 0.6)
-  local ax = s.x or (mon.x + math.floor((mon.w - sw) / 2))
-  local ay = s.y or (mon.y + math.floor((mon.h - sh) / 2))
+  -- Saved geometry is monitor-relative; fit it onto the monitor we restore to.
+  local sw = math.min(s.w or math.floor(mon.w * 0.6), mon.w)
+  local sh = math.min(s.h or math.floor(mon.h * 0.6), mon.h)
+  local rx = s.x or math.floor((mon.w - sw) / 2)
+  local ry = s.y or math.floor((mon.h - sh) / 2)
+  local ax = mon.x + math.max(0, math.min(rx, mon.w - sw))
+  local ay = mon.y + math.max(0, math.min(ry, mon.h - sh))
   local tx, ty, tw, th = tray_target(ax, sw, mon)
 
   -- Start as a strip at the bottom edge on the current workspace...

@@ -45,12 +45,42 @@ Item {
     console.log("minimized-tray " + message)
   }
 
+  // Browser web apps (Omarchy's `omarchy-launch-webapp`, Chrome's "install as
+  // app") get a window class like `chrome-discord.com__channels_@me-Default`
+  // that no desktop entry names. Pull the host out of it so the entry that
+  // launches that site can be found by its Exec line.
+  function webAppHost(appClass) {
+    var m = /^(?:chrome|chromium|brave|msedge|vivaldi)-([^_]+?)(?:__.*)?(?:-[A-Za-z]+)?$/.exec(appClass)
+    return m ? m[1] : ""
+  }
+
+  function entryForClass(appClass) {
+    if (!appClass) return null
+    var entry = DesktopEntries.heuristicLookup(appClass)
+    if (entry) return entry
+    var wanted = appClass.toLowerCase()
+    var host = webAppHost(appClass).toLowerCase()
+    var apps = DesktopEntries.applications ? (DesktopEntries.applications.values || []) : []
+    var byExec = null
+    for (var i = 0; i < apps.length; i++) {
+      var e = apps[i]
+      if (!e) continue
+      var startup = String(e.startupClass || "").toLowerCase()
+      if (startup && startup === wanted) return e
+      if (host && !byExec) {
+        var exec = String(e.execString || e.command || "").toLowerCase()
+        if (exec.indexOf(host) !== -1 && (exec.indexOf("webapp") !== -1 || exec.indexOf("--app=") !== -1)) byExec = e
+      }
+    }
+    return byExec
+  }
+
   function iconFor(client) {
     var candidates = [client["class"], client.initialClass]
     for (var i = 0; i < candidates.length; i++) {
       var id = String(candidates[i] || "")
       if (!id) continue
-      var entry = DesktopEntries.heuristicLookup(id)
+      var entry = entryForClass(id)
       if (entry && entry.icon) {
         var path = Quickshell.iconPath(entry.icon, true)
         if (path) return path
@@ -122,7 +152,7 @@ Item {
     return false
   }
 
-  onFocusModeChanged: if (focusMode) keyCatcher.forceActiveFocus()
+
 
   function setSelected(index) {
     if (index < 0 || index >= root.windows.length) index = -1
@@ -211,16 +241,32 @@ Item {
 
   Component.onCompleted: refresh()
 
-  PanelWindow {
-    id: panel
-    visible: root.windows.length > 0
-    anchors { bottom: true; left: true; right: true }
-    implicitHeight: root.trayHeight
-    color: "transparent"
-    exclusionMode: ExclusionMode.Auto
-    WlrLayershell.namespace: "omarchy-minimized-tray"
-    WlrLayershell.layer: WlrLayer.Top
-    WlrLayershell.keyboardFocus: root.focusMode ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+  // One tray per screen; only the tray on the focused screen takes the keyboard.
+  Variants {
+    model: Quickshell.screens
+
+    PanelWindow {
+      id: panel
+      required property var modelData
+      screen: modelData
+      readonly property bool onFocusedScreen: {
+        var focused = Hyprland.focusedMonitor
+        if (!focused || !focused.name || !panel.screen || !panel.screen.name) return true
+        return focused.name === panel.screen.name
+      }
+      visible: root.windows.length > 0
+      anchors { bottom: true; left: true; right: true }
+      implicitHeight: root.trayHeight
+      color: "transparent"
+      exclusionMode: ExclusionMode.Auto
+      WlrLayershell.namespace: "omarchy-minimized-tray"
+      WlrLayershell.layer: WlrLayer.Top
+      WlrLayershell.keyboardFocus: (root.focusMode && panel.onFocusedScreen) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+      Connections {
+        target: root
+        function onFocusModeChanged() { if (root.focusMode && panel.onFocusedScreen) keyCatcher.forceActiveFocus() }
+      }
 
     Rectangle {
       anchors.fill: parent
@@ -382,6 +428,7 @@ Item {
       }
     }
   }
+  }
 
   IpcHandler {
     target: "minimized-tray"
@@ -392,5 +439,6 @@ Item {
     function select(delta: int): string { root.moveSelection(delta); return root.selectedAddress }
     function selected(): string { return root.selectedAddress }
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
+    function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
   }
 }
