@@ -81,17 +81,38 @@ grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.
 
 ## How it works
 
-- `hypr/gestures.lua` registers the gestures with Hyprland's `hl.gesture`, tunes the
-  swipe, and turns on the workspace slide animation.
-- `hypr/minimize.lua` does the minimize dance. Hyprland only fades a window that is
-  moved to another workspace, so instead the window is floated in place, resized and
-  moved to a strip at the bottom edge (Hyprland animates that), and only then moved to
-  the hidden workspace. Restoring runs it backwards and re-tiles or re-maximizes.
-  `Minimize` is a global Lua table so the tray can call it with `hyprctl dispatch`.
-- `plugins/threefinger.minimized-tray/` is an Omarchy shell plugin. It lists the
-  hidden workspace via `hyprctl clients -j`, refreshes on Hyprland window events, and
-  writes the selected tile's address to `~/.local/state/omarchy/minimized-tray-selected`,
-  which the swipe-up handler reads.
+**Left and right: workspace swipe.** This one is native to Hyprland. `gestures.lua`
+registers a three-finger horizontal gesture with the built-in `workspace` action, so
+Hyprland itself tracks your fingers and slides the workspace with them. The settings in
+the `opt` table tune how far you have to move, how little of a swipe commits, and how
+fast a flick counts. Omarchy ships with the workspace slide animation turned off, so the
+config turns it back on, which is what gives the glide after you let go. The SUPER+1..0
+keys switch that animation off for a split second so keyboard switches stay instant.
+
+**Down: minimize.** Hyprland has no minimize, so `minimize.lua` fakes it in three steps.
+First the focused window is floated in place, with any maximize state remembered and
+removed. Second it is resized to a short strip and moved to the bottom edge; Hyprland
+animates position and size changes on floating windows, so that is the shrink you see.
+Third, once the animation has had its time (`anim_ms`), the window is moved to a hidden
+special workspace called `minimized`. Special workspaces are invisible, skipped by the
+horizontal swipe, and separate from the SUPER+S scratchpad. (Simply moving a window to
+another workspace only fades it, which is why the float-and-shrink detour exists.)
+
+**The tray.** `plugins/threefinger.minimized-tray/` is a small Omarchy shell plugin
+that watches Hyprland's window list (`hyprctl clients -j`, refreshed on window events).
+When anything sits in the hidden workspace, it shows a bottom panel with one tile per
+window and reserves space like the top bar. Hovering or arrowing to a tile writes that
+window's address to `~/.local/state/omarchy/minimized-tray-selected`.
+
+**Up: restore.** The swipe-up handler reads that state file, picks that window, and runs
+the minimize steps in reverse. The window comes back as a strip at the bottom of your
+current workspace, grows to its old size and position, and is then handed back to the
+tiling layout or re-maximized. If nothing is selected it takes the most recently
+minimized window.
+
+**The glue.** The minimize logic is a global Lua table (`Minimize`) inside Hyprland's
+own Lua runtime. The gestures call it directly, and the tray calls the same functions
+from outside through `hyprctl dispatch`, so there is one implementation and two ways in.
 
 ## License
 
