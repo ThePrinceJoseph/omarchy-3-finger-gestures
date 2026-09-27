@@ -32,6 +32,27 @@ Panel {
 
   function get(key) { return root.setting(key, root.defaults[key]) }
 
+  // Sliders show a plain 0.00–1.00 scale in steps of 0.05, so a setting you
+  // liked is easy to remember and get back to. Each maps to the real config
+  // range here; the recommended stop is where the default lands.
+  //   follow  0 = the screen lags far behind your fingers (distance 900)
+  //           1 = it sticks to them (distance 233); 0.60 = default 500
+  //   commit  ratio = 0.02 + d * 0.5;   0.20 = default 0.12
+  //   flick   speed = d * 100;          0.25 = default 25; 0 = off
+  //   glide   speed = 1 + d * 7;        0.50 = default 4.5; 0 = no glide
+  readonly property var scales: ({
+    follow: { rec: 0.60, toConfig: function(d) { return Math.round(900 - d * 666.67) },
+              fromConfig: function(c) { return (900 - Number(c)) / 666.67 } },
+    commit: { rec: 0.20, toConfig: function(d) { return Math.round((0.02 + d * 0.5) * 100) / 100 },
+              fromConfig: function(c) { return (Number(c) - 0.02) / 0.5 } },
+    flick:  { rec: 0.25, toConfig: function(d) { return Math.round(d * 100) },
+              fromConfig: function(c) { return Number(c) / 100 } },
+    glide:  { rec: 0.50, toConfig: function(d) { return d <= 0 ? 0 : Math.round((1 + d * 7) * 10) / 10 },
+              fromConfig: function(c) { return Number(c) <= 0 ? 0 : (Number(c) - 1) / 7 } }
+  })
+  function snap(d) { return Math.max(0, Math.min(1, Math.round(d / 0.05) * 0.05)) }
+  function display(scale, key) { return root.snap(root.scales[scale].fromConfig(root.get(key))) }
+
   function save(patch) {
     root.settings = Object.assign({}, root.settings, patch)
     if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, root.settings)
@@ -131,7 +152,7 @@ Panel {
         Column {
           id: column
           width: scroll.width
-          spacing: Style.space(12)
+          spacing: Style.space(14)
 
           // ---------- Hero ----------
           Item {
@@ -171,12 +192,14 @@ Panel {
           // ---------- Workspace swipe ----------
           PanelSectionHeader { text: "WORKSPACE SWIPE"; foreground: root.foreground; fontFamily: root.fontFamily }
 
-          SettingSlider { label: "Follows fingers"; hint: "slow ← → fast"; minimum: 200; maximum: 1200; step: 50; integer: true
-            value: 1400 - Number(root.get("swipe_distance")); onCommitted: function(v) { root.save({ swipe_distance: 1400 - v }) } }
-          SettingSlider { label: "Swipe needed to commit"; hint: "little ← → a lot"; minimum: 0.05; maximum: 0.6; step: 0.01
-            value: Number(root.get("swipe_cancel_ratio")); onCommitted: function(v) { root.save({ swipe_cancel_ratio: Math.round(v * 100) / 100 }) } }
-          SettingSlider { label: "Glide speed"; hint: "0 turns the glide off"; minimum: 0; maximum: 10; step: 0.5
-            value: Number(root.get("slide_speed")); onCommitted: function(v) { root.save({ slide_speed: v }) } }
+          SettingSlider { label: "Follows your fingers"; low: "lags"; high: "sticks"; recommended: root.scales.follow.rec
+            value: root.display("follow", "swipe_distance"); onCommitted: function(d) { root.save({ swipe_distance: root.scales.follow.toConfig(d) }) } }
+          SettingSlider { label: "Swipe needed to commit"; low: "a nudge"; high: "a long swipe"; recommended: root.scales.commit.rec
+            value: root.display("commit", "swipe_cancel_ratio"); onCommitted: function(d) { root.save({ swipe_cancel_ratio: root.scales.commit.toConfig(d) }) } }
+          SettingSlider { label: "Flick commits"; low: "off"; high: "any flick"; recommended: root.scales.flick.rec; zeroText: "off"
+            value: root.display("flick", "swipe_min_speed_to_force"); onCommitted: function(d) { root.save({ swipe_min_speed_to_force: root.scales.flick.toConfig(d) }) } }
+          SettingSlider { label: "Glide after letting go"; low: "slow"; high: "quick"; recommended: root.scales.glide.rec; zeroText: "off"
+            value: root.display("glide", "slide_speed"); onCommitted: function(d) { root.save({ slide_speed: root.scales.glide.toConfig(d) }) } }
           Toggle {
             width: parent.width; label: "Instant SUPER+1..0"; description: "Keyboard switches skip the glide."
             checked: root.get("instant_keyboard_switch") === true; foreground: root.foreground; fontFamily: root.fontFamily
@@ -229,21 +252,35 @@ Panel {
 
   // ---------- small helpers ----------
   component SettingSlider: Column {
+    id: row
     property string label: ""
-    property string hint: ""
-    property real minimum: 0
-    property real maximum: 1
-    property real step: 0.05
-    property bool integer: false
+    property string low: ""
+    property string high: ""
+    property string zeroText: ""
+    property real recommended: 0.5
     property real value: 0
     signal committed(real value)
+    readonly property real shown: slider.dragging ? root.snap(slider.liveValue) : value
+    function text(v) { return (v <= 0 && zeroText) ? zeroText : v.toFixed(2) }
     width: parent ? parent.width : 0
-    spacing: Style.space(4)
-    Row {
+    spacing: Style.space(2)
+
+    Item {
       width: parent.width
-      Text { text: label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; width: parent.width * 0.55; elide: Text.ElideRight }
-      Text { text: hint; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; width: parent.width * 0.45; horizontalAlignment: Text.AlignRight; elide: Text.ElideLeft }
+      height: labelText.implicitHeight
+      Text { id: labelText; text: row.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; anchors.left: parent.left; width: parent.width - valueText.width - Style.space(8); elide: Text.ElideRight }
+      // Live readout: the value under your finger while dragging, else the set one.
+      Text {
+        id: valueText
+        anchors.right: parent.right
+        text: row.text(row.shown) + (Math.abs(row.shown - row.recommended) < 0.001 ? "  ✓" : "")
+        color: slider.dragging ? Color.accent : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: slider.dragging
+      }
     }
+
     Item {
       width: parent.width
       height: Style.spacing.controlHeight
@@ -253,13 +290,36 @@ Panel {
         anchors.fill: parent
         anchors.leftMargin: Style.space(6)
         anchors.rightMargin: Style.space(6)
-        minimum: parent.parent.minimum
-        maximum: parent.parent.maximum
-        step: parent.parent.step
-        integer: parent.parent.integer
-        value: parent.parent.value
-        onReleased: function(v) { parent.parent.committed(v) }
+        minimum: 0
+        maximum: 1
+        step: 0.05
+        value: row.value
+        onReleased: function(v) { row.committed(root.snap(v)) }
       }
+      // Recommended stop: a small marker under the track. Click it to go back.
+      Item {
+        readonly property real frac: row.recommended
+        x: slider.x + slider.knobSize / 2 + frac * (slider.width - slider.knobSize) - width / 2
+        anchors.top: parent.verticalCenter
+        anchors.topMargin: slider.trackHeight / 2 + Style.space(3)
+        width: Style.space(14)
+        height: Style.space(12)
+        Text {
+          anchors.centerIn: parent
+          text: "▲"
+          color: Math.abs(row.shown - row.recommended) < 0.001 ? Color.accent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: row.committed(row.recommended) }
+      }
+    }
+
+    Item {
+      width: parent.width
+      height: lowText.implicitHeight
+      Text { id: lowText; text: row.low; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.left: parent.left; anchors.leftMargin: Style.space(6) }
+      Text { text: row.high; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.right: parent.right; anchors.rightMargin: Style.space(6) }
     }
   }
 
