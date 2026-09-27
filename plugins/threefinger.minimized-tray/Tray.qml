@@ -362,7 +362,7 @@ Item {
             Component.onCompleted: { var t = root.tileItems; t[index] = entry; root.tileItems = t }
             readonly property bool hovered: mouse.containsMouse || closeMouse.containsMouse
             readonly property bool lit: selected || hovered
-            width: Math.max(Style.space(96), Math.min(naturalWidth, panel.tileMaxWidth))
+            width: Math.max(minWidth, Math.min(naturalWidth, panel.tileMaxWidth))
             height: root.trayHeight - Style.space(10)
             radius: Style.cornerRadius
             color: entry.selected
@@ -395,6 +395,8 @@ Item {
             readonly property int pad: Style.space(10)
             readonly property int gap: Style.space(8)
             readonly property int naturalWidth: pad + icon.width + gap + Math.ceil(title.implicitWidth) + gap + closeButton.width + pad
+            // Smallest useful tile: icon and ✕ with no title.
+            readonly property int minWidth: pad + icon.width + gap + closeButton.width + pad
 
             Image {
               id: icon
@@ -416,6 +418,7 @@ Item {
               font.pixelSize: Style.font.body
               elide: Text.ElideRight
               textFormat: Text.PlainText
+              visible: width >= Style.space(14)
             }
 
             // Close button: a small ✕ after the title.

@@ -55,7 +55,7 @@ reloads by itself. Delete a line to go back to that setting's default.
 | `persistent_workspaces` | `5` | Keep workspaces 1..N alive so a swipe visits each one in order and never creates new ones past N. A workspace above N that already has a window stays reachable. `0` to disable. |
 | `minimize` | `true` | The down/up gestures and the tray. `false` for the workspace swipe only. |
 | `tray_key` | `"SUPER + M"` | Key that toggles the tray's keyboard. `false` for none. |
-| `tray_max` | `5` | How many windows the tray holds. Swipe down on a full tray shows a notification. `0` for no limit (tiles shrink to fit). |
+| `tray_max` | `5` | How many windows the tray holds, 1 to 12. Swipe down on a full tray shows a notification saying so. |
 
 Two more knobs sit at the top of `minimize.lua`: `anim_ms` (how long the shrink and
 grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.qml`).
@@ -66,9 +66,11 @@ grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.
   the tray until you press Escape. If you would rather it never grabbed the keyboard,
   remove the `else if (newest) root.focusMode = true` line in `Tray.qml` and use
   SUPER+M when you want it.
-- **Why the tray holds 5.** Tiles share the screen width and titles shrink to fit. On a
-  1280-wide screen five tiles keep about 22 characters of title, six about 15, eight
-  about 10. Raise `tray_max` if you have a wider screen, or set it to `0` for no limit.
+- **Why the tray holds 5, and at most 12.** The tray is a quick way to carry a few
+  windows to another workspace, not a window list. Tiles share the screen width and
+  titles shrink to fit: on a 1280-wide screen five tiles keep about 22 characters of
+  title, eight about 10, and twelve are down to an icon and a couple of letters. Raise
+  `tray_max` on a wider screen if you like; it is capped at 12.
 - **The tray reserves space** like the bar, so tiled windows re-tile when it appears
   and disappears. To float it over the bottom edge instead, set `exclusionMode:
   ExclusionMode.Ignore` in `Tray.qml`.

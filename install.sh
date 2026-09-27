@@ -38,7 +38,7 @@ fi
 # gestures.lua can see the Minimize table).
 for mod in minimize gestures; do
   line="require(\"hypr.$mod\")"
-  if ! grep -qF "$line" "$hypr/hyprland.lua"; then
+  if ! grep -qE "^[[:space:]]*require\(\"hypr\.$mod\"\)" "$hypr/hyprland.lua"; then
     if [[ ! -f "$hypr/hyprland.lua.bak.$stamp" ]]; then
       cp "$hypr/hyprland.lua" "$hypr/hyprland.lua.bak.$stamp"
       echo "backed up hyprland.lua -> hyprland.lua.bak.$stamp"

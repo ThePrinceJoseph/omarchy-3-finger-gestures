@@ -27,7 +27,8 @@ M.selected_path = os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-sel
 M.stack = M.stack or {}   -- addresses, newest last
 M.saved = M.saved or {}   -- address -> geometry/state to put back on restore
 M.busy = M.busy or {}     -- address -> true while a minimize/restore animation runs
-M.max_windows = M.max_windows or 5  -- tray capacity; 0 = unlimited (gestures.lua sets it from settings)
+M.max_windows = M.max_windows or 5  -- tray capacity, 1..12 (gestures.lua sets it from settings)
+M.op = M.op or {}         -- address -> operation token; bumped on close so stale timers do nothing
 M.pending = M.pending or 0          -- minimizes started but not yet landed in the tray
 M.shutting_down = false             -- set by M.shutdown(); refuses new minimizes
 
@@ -121,7 +122,15 @@ local function clear_state_tag(w)
   if tag then hl.dispatch(hl.dsp.window.tag({ window = w, tag = "-" .. tag })) end
 end
 
+-- Start a new operation on a window; timers compare their token to M.op[addr]
+-- and bail out if anything (a close, a newer operation) has moved on since.
+local function begin(addr)
+  M.op[addr] = (M.op[addr] or 0) + 1
+  return M.op[addr]
+end
+
 local function forget(addr)
+  M.op[addr] = (M.op[addr] or 0) + 1
   M.saved[addr] = nil
   M.busy[addr] = nil
   for i = #M.stack, 1, -1 do
@@ -184,6 +193,7 @@ function M.minimize(w)
   end
   M.busy[addr] = true
   M.pending = M.pending + 1
+  local token = begin(addr)
 
   local ax, ay = vec(w.at)
   local sw, sh = vec(w.size)
@@ -214,22 +224,28 @@ function M.minimize(w)
   hl.dispatch(hl.dsp.window.move({ window = w, x = ax, y = ay }))
 
   -- Next tick: shrink toward the bottom edge, then stash it once it lands.
+  local function put_back(win)
+    hl.dispatch(hl.dsp.window.resize({ window = win, x = sw, y = sh }))
+    hl.dispatch(hl.dsp.window.move({ window = win, x = ax, y = ay }))
+    apply_final_state(win, state)
+  end
   after(30, function()
+    if M.op[addr] ~= token then M.pending = math.max(0, M.pending - 1) return end
     local w2 = find(addr)
-    if not w2 or M.shutting_down then M.pending = math.max(0, M.pending - 1) forget(addr) return end
+    if not w2 then M.pending = math.max(0, M.pending - 1) forget(addr) return end
+    if M.shutting_down then M.pending = math.max(0, M.pending - 1) put_back(w2) forget(addr) return end
     local tx, ty, tw, th = tray_target(ax, sw, mon)
     -- resize first: Hyprland keeps the centre on resize, then move pins the spot
     hl.dispatch(hl.dsp.window.resize({ window = w2, x = tw, y = th }))
     hl.dispatch(hl.dsp.window.move({ window = w2, x = tx, y = ty }))
     after(M.anim_ms, function()
       M.pending = math.max(0, M.pending - 1)
+      if M.op[addr] ~= token then return end
       local w3 = find(addr)
       if not w3 then forget(addr) return end
       if M.shutting_down then
         -- Uninstall started mid-animation: put it back instead of stashing it.
-        hl.dispatch(hl.dsp.window.resize({ window = w3, x = sw, y = sh }))
-        hl.dispatch(hl.dsp.window.move({ window = w3, x = ax, y = ay }))
-        apply_final_state(w3, M.saved[addr] or { floating = false })
+        put_back(w3)
         forget(addr)
         return
       end
@@ -242,11 +258,12 @@ function M.minimize(w)
 end
 
 function M.restore(addr)
+  if M.busy[addr] then return false end -- an animation is already running on it
   local w = find(addr)
   if not w then forget(addr) return false end
   if not (w.workspace and w.workspace.name == M.workspace) then forget(addr) return false end
-  if M.busy[addr] then return false end
   M.busy[addr] = true
+  local token = begin(addr)
   local tagged = state_from_tags(w)
   -- Prefer what is stored on the window (survives reloads), then our table.
   -- With neither, assume a tiled window of a sensible centred size.
@@ -276,11 +293,13 @@ function M.restore(addr)
 
   -- ...then grow up into place and hand it back to the layout.
   after(30, function()
+    if M.op[addr] ~= token then return end
     local w2 = find(addr)
     if not w2 then forget(addr) return end
     hl.dispatch(hl.dsp.window.resize({ window = w2, x = sw, y = sh }))
     hl.dispatch(hl.dsp.window.move({ window = w2, x = ax, y = ay }))
     after(M.anim_ms, function()
+      if M.op[addr] ~= token then return end
       local w3 = find(addr)
       if not w3 then forget(addr) return end
       apply_final_state(w3, s)

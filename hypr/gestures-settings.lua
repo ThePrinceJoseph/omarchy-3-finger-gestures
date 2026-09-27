@@ -30,6 +30,7 @@ return {
   -- restores, Escape lets go). false = no key.
   tray_key = "SUPER + M",
 
-  -- How many windows the tray holds before swipe down says "full". 0 = no limit.
+  -- How many windows the tray holds before swipe down says "full". 1 to 12;
+  -- five keeps titles readable, twelve is icons with a few letters each.
   tray_max = 5,
 }

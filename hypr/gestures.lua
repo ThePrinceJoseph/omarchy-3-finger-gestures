@@ -29,8 +29,7 @@ local defaults = {
   minimize = true,
   -- Key that hands the keyboard to the tray. false = no key.
   tray_key = "SUPER + M",
-  -- How many windows the tray holds before swipe down says "full". 0 = no limit
-  -- (tiles shrink to fit, but titles get short).
+  -- How many windows the tray holds before swipe down says "full" (1..12).
   tray_max = 5,
 }
 
@@ -91,7 +90,7 @@ end
 -- ------------------------------------------------------------------ minimize
 
 if opt.minimize and Minimize then
-  Minimize.max_windows = tonumber(opt.tray_max) or 0
+  Minimize.max_windows = math.max(1, math.min(12, math.floor(tonumber(opt.tray_max) or 5)))
   hl.gesture({ fingers = 3, direction = "down", action = function() Minimize.minimize() end })
   hl.gesture({ fingers = 3, direction = "up", action = function() Minimize.restore_selected() end })
   if opt.tray_key then
