@@ -341,14 +341,15 @@ function M.minimize(w)
     stash()
   end
 
-  -- Picture: ask grim for a small image of the window as it is now, and start
+  -- Picture: ask grim for an image of the window as it is now (0.7 of the
+  -- output's pixels: sharp in the preview, cheap enough to encode) and start
   -- the flight as soon as the file exists (grim grabs its frame before it
   -- writes, so the picture is never stale). Waiting is capped at ~160 ms so
   -- a slow capture cannot stall the gesture.
   local file = thumb_path(addr)
   os.remove(file)
   -- grim writes to a temporary name; the rename makes the file appear whole.
-  hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.3 -t jpeg -q 80 %q && mv -f %q %q",
+  hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.7 -t jpeg -q 85 %q && mv -f %q %q",
     M.thumb_dir, ax, ay, sw, sh, file .. ".part", file .. ".part", file))
   local tries = 0
   local function wait_for_thumb()

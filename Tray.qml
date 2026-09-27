@@ -424,6 +424,7 @@ Item {
                   asynchronous: true
                   fillMode: Image.PreserveAspectCrop
                   smooth: true
+            mipmap: true
                   clip: true
                   visible: status === Image.Ready
                 }
@@ -444,7 +445,8 @@ Item {
                   anchors { top: parent.top; right: parent.right; margins: Style.space(5) }
                   width: Style.space(20); height: width; radius: width / 2
                   readonly property bool hot: closeMouse.containsMouse
-                  visible: tile.hovered || (tile.selected && root.focusMode)
+                  // Mouse only: with the keyboard, Backspace closes the selected tile.
+                  visible: tile.hovered
                   color: hot ? Util.alpha(Color.urgent, 0.85) : Util.alpha(Color.popups.background, 0.85)
                   border.width: 1
                   border.color: Util.alpha(Color.foreground, hot ? 0.6 : 0.3)
@@ -573,6 +575,7 @@ Item {
           asynchronous: true
           fillMode: Image.PreserveAspectFit
           smooth: true
+            mipmap: true
         }
       }
     }
@@ -686,6 +689,7 @@ Item {
             asynchronous: false
             fillMode: Image.PreserveAspectCrop
             smooth: true
+            mipmap: true
             visible: status === Image.Ready
           }
           Image {
