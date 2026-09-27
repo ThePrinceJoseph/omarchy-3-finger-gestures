@@ -42,9 +42,18 @@ files in `~/.config/hypr/`, a generated settings file, and a marked block at the
 `hyprland.lua` that loads them. Nothing under `/usr/share/omarchy` is touched.
 
 From a local checkout, `./install.sh` does the same by copying the folder into place.
-Update with `omarchy plugin update threefinger.gestures`; remove with
-`omarchy plugin remove threefinger.gestures` or the plugin's `uninstall.sh`, which
-brings back anything still in the tray first.
+Update with `omarchy plugin update threefinger.gestures`.
+
+**To remove it, run the plugin's own script:**
+
+```bash
+~/.config/omarchy/plugins/threefinger.gestures/uninstall.sh
+```
+
+It brings back anything still in the dock, removes the Lua files and the require
+block, and then removes the plugin. `omarchy plugin remove` on its own only deletes
+the plugin folder; the gestures would notice the dock is gone and switch themselves
+off with a warning, but the files would stay behind.
 
 ## Settings
 
@@ -66,7 +75,6 @@ omarchy bar set threefinger.gestures tray_max 8
 | `tray_key` | `"SUPER + M"` | Key that toggles the tray's keyboard. `none` for no key. |
 | `tray_max` | `5` | How many windows the tray holds, 1 to 12. Swipe down on a full tray shows a notification. |
 | `tray_thumbnails` | `true` | A picture of each window in its tile, taken as it minimizes. |
-| `tray_height` | `0` | Pixels. `0` picks 72 with thumbnails, 40 without. |
 | `tray_reserve_space` | `false` | `true` makes tiled windows shrink to make room for the tray. `false` floats it over the bottom edge and nothing else moves. |
 
 Settings live in the plugin's entry in `~/.config/omarchy/shell.json`. The generated
@@ -100,7 +108,14 @@ Omarchy's window animation speed.
   hyprctl dispatch "(function() Minimize.restore_all() return hl.dsp.no_op() end)()"
   ```
 - **Hyprland reloaded mid-animation?** Each window carries its saved state as a tag, and
-  `minimize.lua` puts any stranded window straight back in place the next time it loads.
+  `minimize.lua` puts any stranded window straight back the next time it loads, maximized
+  or fullscreen again if it was.
+- **Fullscreen windows.** The dock sits on the overlay layer, so it stays visible and
+  clickable even while a fullscreen window is up. Restoring a maximized and a fullscreen
+  window onto the same workspace at once can only keep one of them that way, since
+  Hyprland allows one fullscreen window per workspace.
+- **Several monitors.** Flights are drawn on the monitor the window is on, and a window
+  restored onto a smaller monitor is fitted to it.
 
 ## How it works
 

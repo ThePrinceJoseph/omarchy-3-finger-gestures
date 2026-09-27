@@ -53,8 +53,12 @@ done
 tmp=$(mktemp "$hypr/.gestures-settings.XXXXXX"); printf '%s\n' "$lua_settings" > "$tmp"; chmod 644 "$tmp"; mv -f "$tmp" "$hypr/gestures-settings.lua"
 "$here/threefinger-require" >/dev/null
 
-hyprctl reload >/dev/null 2>&1 || true
-errors=$(hyprctl configerrors 2>/dev/null || true)
+if ! hyprctl reload >/dev/null 2>&1; then
+  echo "threefinger-apply: could not reach Hyprland to reload (is it running?)" >&2; exit 1
+fi
+if ! errors=$(hyprctl configerrors 2>/dev/null); then
+  echo "threefinger-apply: could not ask Hyprland for config errors" >&2; exit 1
+fi
 if [[ -n "$errors" && "$errors" != "ok" ]]; then
   echo "threefinger-apply: Hyprland reported config errors:" >&2; echo "$errors" >&2; exit 1
 fi

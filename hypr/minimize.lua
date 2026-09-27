@@ -59,12 +59,22 @@ local function monitor(m)
   local scale = (m and m.scale and m.scale > 0) and m.scale or 1
   local pw, ph = m and m.width or 1920, m and m.height or 1200
   if m and m.transform and m.transform % 2 == 1 then pw, ph = ph, pw end
+  local r = m and m.reserved or {}
   return {
+    name = m and m.name or "",
     x = m and m.x or 0,
     y = m and m.y or 0,
     w = math.floor(pw / scale),
     h = math.floor(ph / scale),
+    reserved = { top = r.top or 0, bottom = r.bottom or 0, left = r.left or 0, right = r.right or 0 },
   }
+end
+
+-- The rectangle a maximized or fullscreen window fills on a monitor.
+local function big_rect(state, mon)
+  if state.fullscreen then return mon.x, mon.y, mon.w, mon.h end
+  local r = mon.reserved
+  return mon.x + r.left, mon.y + r.top, mon.w - r.left - r.right, mon.h - r.top - r.bottom
 end
 
 local function current_workspace()
@@ -94,9 +104,12 @@ local function file_exists(path)
   return false
 end
 
-local function rect_json(addr, x, y, w, h)
-  return string.format('{"address":"%s","x":%d,"y":%d,"w":%d,"h":%d}',
-    addr, math.floor(x), math.floor(y), math.floor(w), math.floor(h))
+-- Flight payload for the dock: the rectangle in global coordinates plus the
+-- monitor it is on, so the dock can draw it on that screen's own surface.
+local function rect_json(addr, x, y, w, h, mon)
+  return string.format('{"address":"%s","x":%d,"y":%d,"w":%d,"h":%d,"monitor":"%s","mx":%d,"my":%d}',
+    addr, math.floor(x), math.floor(y), math.floor(w), math.floor(h),
+    mon and mon.name or "", mon and mon.x or 0, mon and mon.y or 0)
 end
 
 -- Talk to the dock plugin (omarchy-shell IPC target "minimized-tray").
@@ -195,8 +208,29 @@ local function recover_stranded()
     if not M.busy[w.address] then
       if has_tag(w, "min_flying") then tag(w, "min_flying", false) end
       if has_tag(w, "min_hidden") then tag(w, "min_hidden", false) end
-      if not (w.workspace and w.workspace.name == M.workspace) and state_from_tags(w) then
-        clear_state_tag(w)
+      if not (w.workspace and w.workspace.name == M.workspace) then
+        local s = state_from_tags(w)
+        if s then
+          -- Put back what the interrupted trip had taken away.
+          if s.floating and w.floating then
+            local mon = monitor(w.monitor)
+            local sw, sh = math.min(s.w or 1, mon.w), math.min(s.h or 1, mon.h)
+            hl.dispatch(hl.dsp.window.resize({ window = w, x = sw, y = sh }))
+            hl.dispatch(hl.dsp.window.move({ window = w, x = mon.x + math.max(0, math.min(s.x or 0, mon.w - sw)), y = mon.y + math.max(0, math.min(s.y or 0, mon.h - sh)) }))
+          end
+          -- Re-maximize a beat later: Hyprland ignores a fullscreen request
+          -- made in the same breath as other changes to the window.
+          if (s.maximized and w.fullscreen ~= 1) or (s.fullscreen and w.fullscreen ~= 2) then
+            local addr, mode = w.address, s.maximized and "maximized" or "fullscreen"
+            after(120, function()
+              local w2 = find(addr)
+              if w2 and not M.busy[addr] then
+                hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "set", mode = mode }))
+              end
+            end)
+          end
+          clear_state_tag(w)
+        end
       end
     end
   end
@@ -278,6 +312,15 @@ function M.minimize(w)
         local w3 = find(addr)
         if M.op[addr] ~= token or not w3 then M.pending = math.max(0, M.pending - 1) return end
         if M.shutting_down then give_up() return end
+        -- A floating window that was maximized/fullscreen: remember its ordinary
+        -- geometry (now that the maximize is off), not the full-screen one.
+        if state.floating and (state.maximized or state.fullscreen) then
+          local ox, oy = vec(w3.at)
+          local ow, oh = vec(w3.size)
+          state.x, state.y, state.w, state.h = ox - mon.x, oy - mon.y, ow, oh
+          clear_state_tag(w3)
+          tag(w3, state_tag(state), true)
+        end
         hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
         table.insert(M.stack, addr)
         M.pending = math.max(0, M.pending - 1)
@@ -294,7 +337,7 @@ function M.minimize(w)
   local function start_flight()
     if M.op[addr] ~= token or not find(addr) then M.pending = math.max(0, M.pending - 1) return end
     if M.shutting_down then give_up() return end
-    tray("flyOut", rect_json(addr, ax, ay, sw, sh))
+    tray("flyOut", rect_json(addr, ax, ay, sw, sh, mon))
     stash()
   end
 
@@ -304,8 +347,9 @@ function M.minimize(w)
   -- a slow capture cannot stall the gesture.
   local file = thumb_path(addr)
   os.remove(file)
-  hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.3 -t jpeg -q 80 %q",
-    M.thumb_dir, ax, ay, sw, sh, file))
+  -- grim writes to a temporary name; the rename makes the file appear whole.
+  hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.3 -t jpeg -q 80 %q && mv -f %q %q",
+    M.thumb_dir, ax, ay, sw, sh, file .. ".part", file .. ".part", file))
   local tries = 0
   local function wait_for_thumb()
     tries = tries + 1
@@ -336,6 +380,9 @@ function M.restore(addr)
   local ry = s.y or math.floor((mon.h - sh) / 2)
   local ax = mon.x + math.max(0, math.min(rx, mon.w - sw))
   local ay = mon.y + math.max(0, math.min(ry, mon.h - sh))
+  local big = s.maximized or s.fullscreen
+  local fx, fy, fw, fh = ax, ay, sw, sh
+  if big then fx, fy, fw, fh = big_rect(s, mon) end
   for i = #M.stack, 1, -1 do
     if M.stack[i] == addr then table.remove(M.stack, i) end
   end
@@ -343,7 +390,7 @@ function M.restore(addr)
   -- The picture takes off from the tile; the real window arrives on the
   -- workspace invisible (opacity 0, no animation), takes its place in the
   -- layout, and is revealed the moment the picture lands on it.
-  tray("flyIn", rect_json(addr, ax, ay, sw, sh))
+  tray("flyIn", rect_json(addr, fx, fy, fw, fh, mon))
   tag(w, "min_hidden", true)
   tag(w, "min_flying", true)
   after(20, function()
@@ -351,9 +398,9 @@ function M.restore(addr)
     if M.op[addr] ~= token or not w2 then return end
     hl.dispatch(hl.dsp.window.move({ window = w2, workspace = target, follow = true }))
     if s.floating then
+      hl.dispatch(hl.dsp.window.resize({ window = w2, x = sw, y = sh }))
       hl.dispatch(hl.dsp.window.move({ window = w2, x = ax, y = ay }))
     end
-    local big = s.maximized or s.fullscreen
     -- Tell the dock where a tiled window really ended up. (A maximized one
     -- flies to the full-size rectangle it was saved with.)
     if not big then
@@ -362,7 +409,7 @@ function M.restore(addr)
         if M.op[addr] ~= token or not w3 then return end
         local x, y = vec(w3.at)
         local ww, hh = vec(w3.size)
-        if ww > 0 and hh > 0 then tray("retarget", rect_json(addr, x, y, ww, hh)) end
+        if ww > 0 and hh > 0 then tray("retarget", rect_json(addr, x, y, ww, hh, mon)) end
       end)
     end
     -- Maximize/fullscreen again just before the reveal: it was dropped before
@@ -446,8 +493,16 @@ end
 -- then make sure no window is left hidden or tagged.
 function M.shutdown()
   M.shutting_down = true
-  M.restore_all()
-  after(M.anim_ms + 300, recover_stranded)
+  local rounds = 0
+  local function sweep()
+    rounds = rounds + 1
+    local left = 0
+    for _, w in ipairs(hl.get_workspace_windows(M.workspace)) do
+      if M.busy[w.address] then left = left + 1 else M.restore(w.address) left = left + 1 end
+    end
+    if left > 0 and rounds < 30 then after(150, sweep) else after(M.anim_ms + 300, recover_stranded) end
+  end
+  sweep()
 end
 
 -- Runs shortly after each config load, once windows are known.

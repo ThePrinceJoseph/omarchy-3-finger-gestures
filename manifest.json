@@ -33,7 +33,6 @@
       "tray_key": "SUPER + M",
       "tray_max": 5,
       "tray_thumbnails": true,
-      "tray_height": 0,
       "tray_reserve_space": false
     },
     "schema": [
@@ -47,7 +46,6 @@
       { "key": "tray_key", "type": "enum", "label": "Tray keyboard key", "options": ["SUPER + M", "SUPER + SHIFT + M", "SUPER + N", "none"], "defaultValue": "SUPER + M", "description": "Hands the keyboard to the tray: Left/Right pick a tile, Enter restores, Escape lets go." },
       { "key": "tray_max", "type": "number", "label": "Tray capacity", "defaultValue": 5, "description": "How many windows the tray holds (1 to 12)." },
       { "key": "tray_thumbnails", "type": "boolean", "label": "Thumbnails", "defaultValue": true, "description": "Show a picture of each minimized window in its tile." },
-      { "key": "tray_height", "type": "number", "label": "Tray height", "defaultValue": 0, "description": "Pixels. 0 picks 72 with thumbnails, 40 without." },
       { "key": "tray_reserve_space", "type": "boolean", "label": "Reserve space", "defaultValue": false, "description": "Tiled windows shrink to make room for the tray instead of it floating over the bottom edge." }
     ]
   }

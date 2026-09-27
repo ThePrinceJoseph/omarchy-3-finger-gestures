@@ -22,7 +22,6 @@ local defaults = {
   tray_key = "SUPER + M",       -- false: no key
   tray_max = 5,                 -- 1..12
   tray_thumbnails = true,
-  tray_height = 0,              -- 0: 72 with thumbnails, 40 without
   tray_reserve_space = false,
 }
 
@@ -82,17 +81,23 @@ end
 
 -- ------------------------------------------------------------------ minimize
 
-if opt.minimize and Minimize then
+-- `omarchy plugin remove` deletes the dock but not these files. Without the
+-- dock there is nowhere to see or click minimized windows, so leave the
+-- minimize gestures off and say so; uninstall.sh removes everything.
+local plugin_dir = os.getenv("HOME") .. "/.config/omarchy/plugins/threefinger.gestures"
+local dock_present = io.open(plugin_dir .. "/manifest.json", "r")
+if dock_present then dock_present:close() end
+
+if opt.minimize and Minimize and not dock_present then
+  hl.notification.create({ text = "3 Finger Gestures: the dock plugin is missing. Reinstall it, or run uninstall.sh to remove the gestures too.", timeout = 10000, icon = "warning" })
+elseif opt.minimize and Minimize then
   Minimize.max_windows = math.max(1, math.min(12, math.floor(tonumber(opt.tray_max) or 5)))
   Minimize.thumbnails = opt.tray_thumbnails and true or false
-  local height = math.floor(tonumber(opt.tray_height) or 0)
-  if height <= 0 then height = Minimize.thumbnails and 72 or 40 end
-  Minimize.tray_height = math.max(24, height)
-  -- The tray plugin reads its look from this file (it watches for changes).
+  -- The dock plugin reads its look from this file (it watches for changes).
   local f = io.open(os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-settings.json", "w")
   if f then
-    f:write(string.format('{"height": %d, "reserveSpace": %s, "thumbnails": %s}\n',
-      Minimize.tray_height, opt.tray_reserve_space and "true" or "false", Minimize.thumbnails and "true" or "false"))
+    f:write(string.format('{"reserveSpace": %s, "thumbnails": %s}\n',
+      opt.tray_reserve_space and "true" or "false", Minimize.thumbnails and "true" or "false"))
     f:close()
   end
   hl.gesture({ fingers = 3, direction = "down", action = function() Minimize.minimize() end })

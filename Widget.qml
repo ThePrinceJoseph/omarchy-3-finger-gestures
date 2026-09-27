@@ -23,7 +23,7 @@ Panel {
   readonly property var defaults: ({
     minimize: true, swipe_distance: 500, swipe_cancel_ratio: 0.12, swipe_min_speed_to_force: 25,
     slide_speed: 4.5, instant_keyboard_switch: true, persistent_workspaces: 5,
-    tray_key: "SUPER + M", tray_max: 5, tray_thumbnails: true, tray_height: 0, tray_reserve_space: false
+    tray_key: "SUPER + M", tray_max: 5, tray_thumbnails: true, tray_reserve_space: false
   })
   readonly property bool minimizeOn: get("minimize") === true
 
@@ -32,7 +32,17 @@ Panel {
   // A value field is being typed into: keep the popup's key handling off it.
   property bool editingValue: false
 
-  function get(key) { return root.setting(key, root.defaults[key]) }
+  // `omarchy bar set` stores what you type as strings, so "true", "false"
+  // and numbers come back as text; normalize so the popup shows the truth.
+  function get(key) {
+    var v = root.setting(key, root.defaults[key])
+    if (typeof v === "string") {
+      if (v === "true") return true
+      if (v === "false") return false
+      if (v.trim() !== "" && !isNaN(Number(v)) && typeof root.defaults[key] === "number") return Number(v)
+    }
+    return v
+  }
 
   // Sliders show a plain 0.00–1.00 scale (two decimals), so a setting you
   // liked is easy to remember and get back to; click the number to type one. Each maps to the real config
@@ -231,7 +241,6 @@ Panel {
               checked: root.get("tray_reserve_space") === true; foreground: root.foreground; fontFamily: root.fontFamily
               onClicked: root.save({ tray_reserve_space: root.get("tray_reserve_space") !== true })
             }
-            SettingNumber { label: "Height (0 = automatic)"; from: 0; to: 160; stepSize: 4; value: Number(root.get("tray_height")); onCommitted: function(v) { root.save({ tray_height: v }) } }
             Dropdown {
               width: parent.width
               label: "Tray keyboard key"
@@ -355,40 +364,46 @@ Panel {
         value: row.value
         onReleased: function(v) { row.committed(root.snap(v)) }
       }
-      // Recommended stop: a marker under the track. Click it to go back.
+      // Recommended stop: a marker under the track, centred on where the knob
+      // sits at that value (same clamp PanelSlider uses). Click it to go back.
       Item {
         id: marker
         readonly property real frac: row.recommended
-        // Same clamp PanelSlider uses for its knob, so the arrow sits under it.
         readonly property real centreX: slider.x + Math.max(0, Math.min(slider.width - slider.knobSize, slider.width * frac - slider.knobSize / 2)) + slider.knobSize / 2
-        // Keep the label inside the row: it hangs right of the arrow unless
-        // that would run off the edge, then left.
-        readonly property bool labelRight: centreX + Style.space(10) + markerLabel.implicitWidth < parent.width
-        x: labelRight ? centreX - Style.space(7) : centreX + Style.space(7) - width
+        readonly property bool onIt: Math.abs(row.shown - row.recommended) < 0.001
+        // The label hangs right of the arrow unless that would run off the edge.
+        readonly property bool labelRight: centreX + markerArrow.width / 2 + Style.space(4) + markerLabel.implicitWidth < parent.width
         anchors.top: parent.verticalCenter
-        anchors.topMargin: slider.trackHeight / 2 + Style.space(3)
-        width: Style.space(14) + Style.space(4) + markerLabel.implicitWidth
+        anchors.topMargin: slider.trackHeight / 2 + Style.space(2)
+        x: 0
+        width: parent.width
         height: Style.space(12)
-        readonly property color tone: Math.abs(row.shown - row.recommended) < 0.001 ? Color.accent : root.dim
         Text {
           id: markerArrow
-          x: marker.labelRight ? 0 : parent.width - width
+          x: marker.centreX - width / 2
           anchors.verticalCenter: parent.verticalCenter
           text: "▲"
-          color: marker.tone
+          color: root.foreground
+          opacity: marker.onIt ? 1.0 : 0.7
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
         Text {
           id: markerLabel
-          x: marker.labelRight ? markerArrow.width + Style.space(4) : 0
+          x: marker.labelRight ? markerArrow.x + markerArrow.width + Style.space(4) : markerArrow.x - Style.space(4) - width
           anchors.verticalCenter: parent.verticalCenter
           text: "recommended"
-          color: marker.tone
+          color: marker.onIt ? Color.accent : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: row.committed(row.recommended) }
+        MouseArea {
+          x: Math.min(markerArrow.x, markerLabel.x) - Style.space(2)
+          width: markerArrow.width + Style.space(4) + markerLabel.width + Style.space(4)
+          height: parent.height
+          cursorShape: Qt.PointingHandCursor
+          onClicked: row.committed(row.recommended)
+        }
       }
     }
 

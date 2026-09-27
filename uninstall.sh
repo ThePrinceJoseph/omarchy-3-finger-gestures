@@ -13,7 +13,13 @@ hyprctl dispatch "(function()
   end
   return hl.dsp.no_op()
 end)()" >/dev/null 2>&1 || true
-sleep 1.5
+# Wait until the hidden workspace is really empty (flights in progress finish first).
+for _ in $(seq 1 40); do
+  left=$(hyprctl clients -j 2>/dev/null | grep -c '"name": "special:minimized"' || true)
+  [[ "${left:-0}" -eq 0 ]] && break
+  sleep 0.1
+done
+sleep 0.6
 
 "$here/threefinger-require" --remove 2>/dev/null || true
 rm -f "$hypr/minimize.lua" "$hypr/gestures.lua" "$hypr/gestures-settings.lua"

@@ -33,7 +33,6 @@ Item {
   // From gestures.lua via the settings file.
   property bool reserveSpace: false
   property bool thumbnails: true
-  property int tileWidthSetting: 0   // 0 = automatic
 
   property var windows: []
   property int selectedIndex: -1
@@ -54,7 +53,6 @@ Item {
       var cfg = JSON.parse(text || "{}")
       root.reserveSpace = cfg.reserveSpace === true
       root.thumbnails = cfg.thumbnails !== false
-      root.tileWidthSetting = cfg.height > 0 ? 0 : 0
     } catch (e) {
       root.log("could not parse " + root.settingsPath + ": " + e)
     }
@@ -146,7 +144,7 @@ Item {
         title: String(c.title || c["class"] || "Window"),
         appClass: String(c["class"] || ""),
         icon: root.iconFor(c),
-        thumb: "file://" + root.thumbDir + "/" + address.replace(/[^0-9a-zA-Z]/g, "") + ".jpg",
+        thumb: "file://" + root.thumbDir + "/" + address.replace(/[^0-9a-zA-Z]/g, "") + ".jpg?t=" + Date.now(),
         order: seen[address]
       })
     }
@@ -315,7 +313,9 @@ Item {
       color: "transparent"
       exclusionMode: root.reserveSpace ? ExclusionMode.Auto : ExclusionMode.Ignore
       WlrLayershell.namespace: "omarchy-minimized-tray"
-      WlrLayershell.layer: WlrLayer.Top
+      // Overlay, not Top: Hyprland draws fullscreen windows above the Top
+      // layer, and the dock must stay reachable while one is up.
+      WlrLayershell.layer: WlrLayer.Overlay
       WlrLayershell.keyboardFocus: (root.focusMode && dock.onFocusedScreen) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
       Connections {
@@ -578,40 +578,44 @@ Item {
     }
   }
 
-  // The flight: a picture of the window that shrinks from where the window
-  // was into its tile (minimize) or grows from the tile back to where the
-  // window goes (restore). minimize.lua drives it over IPC and swaps the real
+  // Flights: a picture of the window that shrinks from where the window was
+  // into its tile (minimize) or grows from the tile back to where the window
+  // goes (restore). minimize.lua drives them over IPC and swaps the real
   // window in or out without animation underneath, so what you see moving is
-  // always this proxy.
-  property var flight: null   // { address, thumb, icon }
-  property bool flightOut: true
+  // always a picture. Several can be in the air at once (restore-all); each
+  // has its own proxy and timers. Coordinates arrive global and are drawn in
+  // the named monitor's own space.
+  ListModel { id: flightsModel }
+
+  function screenNamed(name) {
+    var screens = Quickshell.screens
+    for (var i = 0; i < screens.length; i++) if (screens[i] && screens[i].name === name) return screens[i]
+    return root.focusedScreen()
+  }
 
   function startFlight(payload, out) {
     var p
     try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad flight payload: " + e); return "bad json" }
-    var scr = root.focusedScreen()
     var addr = String(p.address || "")
+    var scr = p.monitor ? root.screenNamed(String(p.monitor)) : root.focusedScreen()
+    var ox = Number(p.mx) || 0, oy = Number(p.my) || 0
     var n = root.windows.length, idx = -1
     for (var i = 0; i < n; i++) if (root.windows[i].address === addr) idx = i
     if (out) { if (idx < 0) { idx = n; n = n + 1 } }
     else if (idx < 0) return "not in dock"
     var tileR = root.tileRect(idx, n, scr)
-    var winR = { x: Number(p.x) || 0, y: Number(p.y) || 0, w: Math.max(1, Number(p.w) || 1), h: Math.max(1, Number(p.h) || 1) }
+    var winR = { x: (Number(p.x) || 0) - ox, y: (Number(p.y) || 0) - oy, w: Math.max(1, Number(p.w) || 1), h: Math.max(1, Number(p.h) || 1) }
     var from = out ? winR : tileR, to = out ? tileR : winR
     var entry = idx < root.windows.length ? root.windows[idx] : null
-    root.flightOut = out
-    root.flight = {
-      address: addr,
-      thumb: entry ? entry.thumb : ("file://" + root.thumbDir + "/" + addr.replace(/[^0-9a-zA-Z]/g, "") + ".jpg"),
-      icon: entry ? entry.icon : ""
-    }
-    flyWindow.screen = scr
-    flightAnim.stop()
-    proxy.x = from.x; proxy.y = from.y; proxy.width = from.w; proxy.height = from.h
-    proxy.opacity = 1
-    flyWindow.visible = true
-    flightAnim.toX = to.x; flightAnim.toY = to.y; flightAnim.toW = to.w; flightAnim.toH = to.h
-    flightAnim.start()
+    // One flight per window: a new one replaces the old.
+    for (var f = flightsModel.count - 1; f >= 0; f--) if (flightsModel.get(f).address === addr) flightsModel.remove(f)
+    flightsModel.append({
+      address: addr, out: out, screenName: scr ? scr.name : "",
+      thumb: entry ? entry.thumb : ("file://" + root.thumbDir + "/" + addr.replace(/[^0-9a-zA-Z]/g, "") + ".jpg?t=" + Date.now()),
+      icon: entry ? entry.icon : "",
+      fromX: from.x, fromY: from.y, fromW: from.w, fromH: from.h,
+      toX: to.x, toY: to.y, toW: to.w, toH: to.h, generation: 0
+    })
     return "ok"
   }
 
@@ -619,73 +623,99 @@ Item {
   function retargetFlight(payload) {
     var p
     try { p = JSON.parse(payload || "{}") } catch (e) { return "bad json" }
-    if (!root.flight || String(p.address || "") !== root.flight.address || !flightAnim.running) return "no flight"
-    flightAnim.stop()
-    flightAnim.toX = Number(p.x) || 0; flightAnim.toY = Number(p.y) || 0
-    flightAnim.toW = Math.max(1, Number(p.w) || 1); flightAnim.toH = Math.max(1, Number(p.h) || 1)
-    flightAnim.duration = 200
-    flightAnim.start()
-    flightAnim.duration = 320
-    return "ok"
+    var addr = String(p.address || ""), ox = Number(p.mx) || 0, oy = Number(p.my) || 0
+    for (var f = 0; f < flightsModel.count; f++) {
+      if (flightsModel.get(f).address !== addr) continue
+      flightsModel.setProperty(f, "toX", (Number(p.x) || 0) - ox)
+      flightsModel.setProperty(f, "toY", (Number(p.y) || 0) - oy)
+      flightsModel.setProperty(f, "toW", Math.max(1, Number(p.w) || 1))
+      flightsModel.setProperty(f, "toH", Math.max(1, Number(p.h) || 1))
+      flightsModel.setProperty(f, "generation", flightsModel.get(f).generation + 1)
+      return "ok"
+    }
+    return "no flight"
   }
 
-  function endFlight() { flightAnim.stop(); flyWindow.visible = false; root.flight = null }
+  function endFlight(address) {
+    for (var f = flightsModel.count - 1; f >= 0; f--) if (!address || flightsModel.get(f).address === address) flightsModel.remove(f)
+  }
 
-  PanelWindow {
-    id: flyWindow
-    visible: false
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
-    exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.namespace: "omarchy-minimized-flight"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-    mask: Region {}
+  // One transparent full-screen surface per screen carries that screen's proxies.
+  Variants {
+    model: Quickshell.screens
 
-    Rectangle {
-      id: proxy
-      radius: root.frameRadius
-      color: Util.alpha(Color.popups.background, 0.96)
-      border.width: 1
-      border.color: Util.alpha(Color.accent, 0.7)
-      clip: true
-      Image {
-        id: proxyImage
-        anchors.fill: parent
-        anchors.margins: 1
-        source: root.flight ? root.flight.thumb : ""
-        cache: false
-        asynchronous: false
-        fillMode: Image.PreserveAspectCrop
-        smooth: true
-        visible: status === Image.Ready
+    PanelWindow {
+      id: flyWindow
+      required property var modelData
+      screen: modelData
+      readonly property int flightsHere: {
+        var n = 0
+        for (var f = 0; f < flightsModel.count; f++) if (flightsModel.get(f).screenName === (flyWindow.screen ? flyWindow.screen.name : "")) n++
+        return n
       }
-      Image {
-        anchors.centerIn: parent
-        width: Math.min(Style.space(48), parent.height * 0.6); height: width
-        source: root.flight ? root.flight.icon : ""
-        sourceSize: Qt.size(width, height)
-        visible: proxyImage.status !== Image.Ready && root.flight && root.flight.icon !== ""
-        opacity: 0.85
+      visible: flightsHere > 0
+      anchors { top: true; bottom: true; left: true; right: true }
+      color: "transparent"
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.namespace: "omarchy-minimized-flight"
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+      mask: Region {}
+
+      Repeater {
+        model: flightsModel
+
+        delegate: Rectangle {
+          id: proxy
+          required property var model
+          required property int index
+          visible: model.screenName === (flyWindow.screen ? flyWindow.screen.name : "")
+          x: model.fromX; y: model.fromY; width: model.fromW; height: model.fromH
+          radius: root.frameRadius
+          color: Util.alpha(Color.popups.background, 0.96)
+          border.width: 1
+          border.color: Util.alpha(Color.accent, 0.7)
+          clip: true
+
+          Image {
+            id: proxyImage
+            anchors.fill: parent
+            anchors.margins: 1
+            source: proxy.model.thumb
+            cache: false
+            asynchronous: false
+            fillMode: Image.PreserveAspectCrop
+            smooth: true
+            visible: status === Image.Ready
+          }
+          Image {
+            anchors.centerIn: parent
+            width: Math.min(Style.space(48), parent.height * 0.6); height: width
+            source: proxy.model.icon
+            sourceSize: Qt.size(width, height)
+            visible: proxyImage.status !== Image.Ready && proxy.model.icon !== ""
+            opacity: 0.85
+          }
+
+          ParallelAnimation {
+            id: flightAnim
+            property int duration: 320
+            NumberAnimation { target: proxy; property: "x"; to: proxy.model.toX; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+            NumberAnimation { target: proxy; property: "y"; to: proxy.model.toY; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+            NumberAnimation { target: proxy; property: "width"; to: proxy.model.toW; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+            NumberAnimation { target: proxy; property: "height"; to: proxy.model.toH; duration: flightAnim.duration; easing.type: Easing.OutCubic }
+            onFinished: settle.restart()
+          }
+          // Hold the landed picture a moment so the real tile / window is
+          // there underneath before it goes.
+          Timer { id: settle; interval: proxy.model.out ? 120 : 60; onTriggered: root.endFlight(proxy.model.address) }
+          // A retarget restarts the motion from wherever the picture is now.
+          property int seenGeneration: 0
+          onModelChanged: if (model && model.generation !== seenGeneration) { seenGeneration = model.generation; settle.stop(); flightAnim.stop(); flightAnim.duration = 200; flightAnim.start() }
+          Component.onCompleted: { if (proxy.visible) flightAnim.start(); else root.endFlight(proxy.model.address) }
+        }
       }
     }
-
-    ParallelAnimation {
-      id: flightAnim
-      property real toX: 0
-      property real toY: 0
-      property real toW: 1
-      property real toH: 1
-      property int duration: 320
-      NumberAnimation { target: proxy; property: "x"; to: flightAnim.toX; duration: flightAnim.duration; easing.type: Easing.OutCubic }
-      NumberAnimation { target: proxy; property: "y"; to: flightAnim.toY; duration: flightAnim.duration; easing.type: Easing.OutCubic }
-      NumberAnimation { target: proxy; property: "width"; to: flightAnim.toW; duration: flightAnim.duration; easing.type: Easing.OutCubic }
-      NumberAnimation { target: proxy; property: "height"; to: flightAnim.toH; duration: flightAnim.duration; easing.type: Easing.OutCubic }
-      onFinished: flightSettle.restart()
-    }
-    // Hold the landed picture a moment so the real tile / window is there
-    // underneath before it goes.
-    Timer { id: flightSettle; interval: root.flightOut ? 120 : 60; onTriggered: root.endFlight() }
   }
 
   IpcHandler {
@@ -693,7 +723,7 @@ Item {
     function flyOut(payload: string): string { return root.startFlight(payload, true) }
     function flyIn(payload: string): string { return root.startFlight(payload, false) }
     function retarget(payload: string): string { return root.retargetFlight(payload) }
-    function endFlight(): string { root.endFlight(); return "ok" }
+    function endFlight(): string { root.endFlight(""); return "ok" }
     function refresh(): string { root.refresh(); return "ok" }
     function count(): string { return String(root.windows.length) }
     function focus(): string { root.toggleFocus(); return root.focusMode ? "focused" : "unfocused" }
