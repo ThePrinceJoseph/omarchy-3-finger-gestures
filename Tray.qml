@@ -237,11 +237,27 @@ Item {
 
   Timer { id: refreshTimer; interval: 80; repeat: false; onTriggered: root.refresh() }
 
+  // Lua talks to the dock through Hyprland's own event socket (the `event`
+  // dispatcher emits "custom>>..."): no process to spawn, a millisecond away.
+  property string lastCustom: ""
+  function handleCustom(data) {
+    root.lastCustom = data
+    var m = /^threefinger (\w+) ?([\s\S]*)$/.exec(String(data || ""))
+    if (!m) return
+    var cmd = m[1], payload = m[2]
+    if (cmd === "flyOut") root.flyOutCaptured(payload)
+    else if (cmd === "flyIn") root.startFlight(payload, false, "")
+    else if (cmd === "retarget") root.retargetFlight(payload)
+    else if (cmd === "endFlight") root.endFlight("")
+    else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
+  }
+
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       if (!event || !event.name) return
       var name = String(event.name)
+      if (name === "custom") { root.handleCustom(event.data); return }
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
           || name === "configreloaded") refreshTimer.restart()
@@ -538,7 +554,7 @@ Item {
       Rectangle {
         id: previewCard
         readonly property var entry: root.previewEntry || root.lastPreviewEntry
-        readonly property int imgW: Math.min(Style.space(520), Math.round(previewWindow.width * 0.42))
+        readonly property int imgW: Math.min(Style.space(260), Math.round(previewWindow.width * 0.21))
         readonly property var tileR: root.tileRect(Math.max(0, root.previewIndex), Math.max(1, root.windows.length), previewWindow.screen)
         width: imgW + 2 * root.pad
         height: previewTitle.height + Style.space(8) + previewImage.height + 2 * root.pad
@@ -591,7 +607,8 @@ Item {
             asynchronous: true
             fillMode: Image.PreserveAspectFit
             smooth: true
-            mipmap: true
+            // No mipmaps here: at this scale they soften text; bilinear is crisper.
+            mipmap: false
           }
         }
       }
@@ -613,7 +630,30 @@ Item {
     return root.focusedScreen()
   }
 
-  function startFlight(payload, out) {
+  // Minimize: photograph the window first (its own buffer), fly that picture
+  // straight from the grab, save the file for the tile in the background, and
+  // only then tell Lua to swap the real window out (Minimize.stash).
+  function flyOutCaptured(payload) {
+    var p
+    try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad flight payload: " + e); return "bad json" }
+    var addr = String(p.address || ""), path = String(p.thumbPath || "")
+    var tl = root.toplevelFor(addr)
+    var done = function(result) {
+      var picture = result ? String(result.url) : ""
+      root.startFlight(payload, true, picture)
+      Quickshell.execDetached(["hyprctl", "dispatch", "(function() Minimize.stash('" + addr + "') return hl.dsp.no_op() end)()"])
+      if (result && path) {
+        var part = path + ".part.jpg"
+        if (result.saveToFile(part) === true) Quickshell.execDetached(["mv", "-f", part, path])
+      }
+    }
+    if (!tl) { done(null); return "no toplevel, flying the icon" }
+    root.captureQueue = root.captureQueue.concat([{ address: addr, toplevel: tl, w: Math.max(1, Number(p.w) || 1), h: Math.max(1, Number(p.h) || 1), callback: done }])
+    root.nextCapture()
+    return "ok"
+  }
+
+  function startFlight(payload, out, picture) {
     var p
     try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad flight payload: " + e); return "bad json" }
     var addr = String(p.address || "")
@@ -631,7 +671,7 @@ Item {
     for (var f = flightsModel.count - 1; f >= 0; f--) if (flightsModel.get(f).address === addr) flightsModel.remove(f)
     flightsModel.append({
       address: addr, out: out, screenName: scr ? scr.name : "",
-      thumb: entry ? entry.thumb : ("file://" + root.thumbDir + "/" + addr.replace(/[^0-9a-zA-Z]/g, "") + ".jpg?t=" + Date.now()),
+      thumb: picture ? picture : (entry ? entry.thumb : ("file://" + root.thumbDir + "/" + addr.replace(/[^0-9a-zA-Z]/g, "") + ".jpg?t=" + Date.now())),
       icon: entry ? entry.icon : "",
       fromX: from.x, fromY: from.y, fromW: from.w, fromH: from.h,
       toX: to.x, toY: to.y, toW: to.w, toH: to.h, generation: 0
@@ -758,7 +798,12 @@ Item {
   function requestCapture(address, path, w, h) {
     var tl = root.toplevelFor(address)
     if (!tl) return "no toplevel for " + address
-    root.captureQueue = root.captureQueue.concat([{ address: address, path: path, toplevel: tl, w: Math.max(1, Number(w) || 1), h: Math.max(1, Number(h) || 1) }])
+    var cb = function(result) {
+      if (!result) return
+      var part = path + ".part.jpg"
+      if (result.saveToFile(part) === true) Quickshell.execDetached(["mv", "-f", part, path])
+    }
+    root.captureQueue = root.captureQueue.concat([{ address: address, toplevel: tl, w: Math.max(1, Number(w) || 1), h: Math.max(1, Number(h) || 1), callback: cb }])
     root.nextCapture()
     return "ok"
   }
@@ -776,16 +821,16 @@ Item {
     captureTimeout.restart()
   }
 
-  function finishCapture(ok) {
+  function finishCapture(result) {
     captureTimeout.stop()
     captureView.captureSource = null
     var job = root.capturing
     root.capturing = null
-    if (job) root.log("capture " + (ok ? "saved " : "FAILED ") + job.path)
+    if (job && job.callback) job.callback(result || null)
     root.nextCapture()
   }
 
-  Timer { id: captureTimeout; interval: 400; onTriggered: root.finishCapture(false) }
+  Timer { id: captureTimeout; interval: 300; onTriggered: root.finishCapture(null) }
 
   PanelWindow {
     id: captureWindow
@@ -810,15 +855,7 @@ Item {
       x: -width
       onHasContentChanged: {
         if (!hasContent || !root.capturing) return
-        var job = root.capturing
-        captureView.grabToImage(function(result) {
-          // Write to a temporary name and rename, so a reader never sees a
-          // half-written file.
-          var part = job.path + ".part.jpg"
-          var ok = result && result.saveToFile(part)
-          if (ok === true) Quickshell.execDetached(["mv", "-f", part, job.path])
-          root.finishCapture(ok === true)
-        })
+        captureView.grabToImage(function(result) { root.finishCapture(result) })
       }
     }
   }
@@ -826,12 +863,13 @@ Item {
   IpcHandler {
     target: "minimized-tray"
     function capture(address: string, path: string, w: int, h: int): string { return root.requestCapture(address, path, w, h) }
+    function lastCustom(): string { return root.lastCustom }
     function toplevels(): string {
       var t = Hyprland.toplevels.values, w = ToplevelManager.toplevels.values
       return "hypr=" + t.length + " wayland=" + w.length + (t.length ? " first=" + t[0].address + " linked=" + (t[0].wayland ? "yes" : "no") : "")
     }
-    function flyOut(payload: string): string { return root.startFlight(payload, true) }
-    function flyIn(payload: string): string { return root.startFlight(payload, false) }
+    function flyOut(payload: string): string { return root.flyOutCaptured(payload) }
+    function flyIn(payload: string): string { return root.startFlight(payload, false, "") }
     function retarget(payload: string): string { return root.retargetFlight(payload) }
     function endFlight(): string { root.endFlight(""); return "ok" }
     function refresh(): string { root.refresh(); return "ok" }

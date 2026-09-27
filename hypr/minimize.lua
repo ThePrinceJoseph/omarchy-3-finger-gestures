@@ -39,6 +39,7 @@ M.pending = M.pending or 0          -- minimizes started but not yet landed in t
 M.shutting_down = false             -- set by M.shutdown(); refuses new minimizes
 M.thumbnails = M.thumbnails or false -- show the picture in the dock tile (gestures.lua sets it)
 M.thumb_dir = os.getenv("HOME") .. "/.cache/threefinger-tray"
+M.inflight = M.inflight or {} -- address -> what a minimize in progress needs when the dock calls back
 
 -- ------------------------------------------------------------------ helpers
 
@@ -106,19 +107,17 @@ end
 
 -- Flight payload for the dock: the rectangle in global coordinates plus the
 -- monitor it is on, so the dock can draw it on that screen's own surface.
-local function rect_json(addr, x, y, w, h, mon)
-  return string.format('{"address":"%s","x":%d,"y":%d,"w":%d,"h":%d,"monitor":"%s","mx":%d,"my":%d}',
+local function rect_json(addr, x, y, w, h, mon, extra)
+  return string.format('{"address":"%s","x":%d,"y":%d,"w":%d,"h":%d,"monitor":"%s","mx":%d,"my":%d%s}',
     addr, math.floor(x), math.floor(y), math.floor(w), math.floor(h),
-    mon and mon.name or "", mon and mon.x or 0, mon and mon.y or 0)
+    mon and mon.name or "", mon and mon.x or 0, mon and mon.y or 0, extra or "")
 end
 
--- Talk to the dock plugin (omarchy-shell IPC target "minimized-tray").
+-- Talk to the dock plugin through Hyprland's own event socket: the `event`
+-- dispatcher emits "custom>>threefinger <method> <payload>", which the dock
+-- listens for. No process is spawned, so it arrives within a millisecond.
 local function tray(method, payload)
-  if payload then
-    hl.exec_cmd(string.format("omarchy-shell minimized-tray %s %q", method, payload))
-  else
-    hl.exec_cmd("omarchy-shell minimized-tray " .. method)
-  end
+  hl.dispatch(hl.dsp.event("threefinger " .. method .. (payload and (" " .. payload) or "")))
 end
 
 local function tag(w, name, on)
@@ -190,6 +189,7 @@ local function clear_transient_tags(w)
 end
 
 local function forget(addr)
+  M.inflight[addr] = nil
   os.remove(thumb_path(addr))
   M.op[addr] = (M.op[addr] or 0) + 1
   M.saved[addr] = nil
@@ -272,6 +272,33 @@ function M.minimize(w)
   clear_state_tag(w)
   tag(w, state_tag(state), true)
 
+  M.inflight[addr] = { token = token, state = state, mon = mon, ax = ax, ay = ay, sw = sw, sh = sh }
+
+  -- Ask the dock to photograph the window (its own buffer, through the
+  -- compositor) and fly the picture; the dock calls Minimize.stash() back the
+  -- moment the picture is on screen, so the real window is swapped out only
+  -- once there is something covering it. If the dock never answers, stash
+  -- anyway after a beat so a swipe is never silently lost.
+  local file = thumb_path(addr)
+  os.remove(file)
+  tray("flyOut", rect_json(addr, ax, ay, sw, sh, mon, string.format(',"thumbPath":"%s"', file)))
+  after(300, function()
+    local op = M.inflight[addr]
+    if op and op.token == token then M.stash(addr) end
+  end)
+  return true
+end
+
+-- Second half of a minimize, called by the dock once the flying picture is
+-- up (or by the safety timer above). Hides the real window (opacity 0, no
+-- animation), drops any maximize/fullscreen (a fullscreen window must never
+-- change workspace: Hyprland hands the state to a neighbour) and moves it to
+-- the hidden workspace unseen.
+function M.stash(addr)
+  local op = M.inflight[addr]
+  if not op then return false end
+  M.inflight[addr] = nil
+  local token, state, mon = op.token, op.state, op.mon
   local function give_up()
     M.pending = math.max(0, M.pending - 1)
     local win = find(addr)
@@ -286,76 +313,44 @@ function M.minimize(w)
     tray("endFlight")
     forget(addr)
   end
-
-  -- Send it to the hidden workspace with animations off: the flying picture
-  -- is what the eye follows.
-  -- The picture now covers the window exactly, so the real one can vanish
-  -- (opacity 0, no animation), drop any maximize/fullscreen (a fullscreen
-  -- window must never change workspace: Hyprland hands the state to a
-  -- neighbour) and slip into the hidden workspace unseen.
-  local function stash()
-    local win = find(addr)
-    if M.op[addr] ~= token or not win then M.pending = math.max(0, M.pending - 1) return end
+  local win = find(addr)
+  if M.op[addr] ~= token or not win then M.pending = math.max(0, M.pending - 1) return false end
+  if M.shutting_down then give_up() return false end
+  tag(win, "min_flying", true)
+  tag(win, "min_hidden", true)
+  after(20, function()
+    local w2 = find(addr)
+    if M.op[addr] ~= token or not w2 then M.pending = math.max(0, M.pending - 1) return end
     if M.shutting_down then give_up() return end
-    tag(win, "min_flying", true)
-    tag(win, "min_hidden", true)
+    if w2.fullscreen == 1 then
+      hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "unset", mode = "maximized" }))
+    elseif w2.fullscreen == 2 then
+      hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "unset", mode = "fullscreen" }))
+    end
     after(20, function()
-      local w2 = find(addr)
-      if M.op[addr] ~= token or not w2 then M.pending = math.max(0, M.pending - 1) return end
+      local w3 = find(addr)
+      if M.op[addr] ~= token or not w3 then M.pending = math.max(0, M.pending - 1) return end
       if M.shutting_down then give_up() return end
-      if w2.fullscreen == 1 then
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "unset", mode = "maximized" }))
-      elseif w2.fullscreen == 2 then
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "unset", mode = "fullscreen" }))
+      -- A floating window that was maximized/fullscreen: remember its ordinary
+      -- geometry (now that the maximize is off), not the full-screen one.
+      if state.floating and (state.maximized or state.fullscreen) then
+        local ox, oy = vec(w3.at)
+        local ow, oh = vec(w3.size)
+        state.x, state.y, state.w, state.h = ox - mon.x, oy - mon.y, ow, oh
+        clear_state_tag(w3)
+        tag(w3, state_tag(state), true)
       end
-      after(20, function()
-        local w3 = find(addr)
-        if M.op[addr] ~= token or not w3 then M.pending = math.max(0, M.pending - 1) return end
-        if M.shutting_down then give_up() return end
-        -- A floating window that was maximized/fullscreen: remember its ordinary
-        -- geometry (now that the maximize is off), not the full-screen one.
-        if state.floating and (state.maximized or state.fullscreen) then
-          local ox, oy = vec(w3.at)
-          local ow, oh = vec(w3.size)
-          state.x, state.y, state.w, state.h = ox - mon.x, oy - mon.y, ow, oh
-          clear_state_tag(w3)
-          tag(w3, state_tag(state), true)
-        end
-        hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
-        table.insert(M.stack, addr)
-        M.pending = math.max(0, M.pending - 1)
-        after(M.anim_ms + 200, function()
-          if M.op[addr] ~= token then return end
-          local w4 = find(addr)
-          if w4 then tag(w4, "min_flying", false) tag(w4, "min_hidden", false) end
-          M.busy[addr] = nil
-        end)
+      hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
+      table.insert(M.stack, addr)
+      M.pending = math.max(0, M.pending - 1)
+      after(M.anim_ms + 200, function()
+        if M.op[addr] ~= token then return end
+        local w4 = find(addr)
+        if w4 then tag(w4, "min_flying", false) tag(w4, "min_hidden", false) end
+        M.busy[addr] = nil
       end)
     end)
-  end
-
-  local function start_flight()
-    if M.op[addr] ~= token or not find(addr) then M.pending = math.max(0, M.pending - 1) return end
-    if M.shutting_down then give_up() return end
-    tray("flyOut", rect_json(addr, ax, ay, sw, sh, mon))
-    stash()
-  end
-
-  -- Picture: ask the dock to capture the window's own buffer through the
-  -- compositor (nothing overlapping it ends up in the picture), and start
-  -- the flight as soon as the file exists. Waiting is capped at ~200 ms so a
-  -- slow capture cannot stall the gesture; the flight then flies a plain
-  -- card with the icon.
-  local file = thumb_path(addr)
-  os.remove(file)
-  hl.exec_cmd(string.format("mkdir -p %q && omarchy-shell minimized-tray capture %q %q %d %d",
-    M.thumb_dir, addr, file, math.floor(sw), math.floor(sh)))
-  local tries = 0
-  local function wait_for_thumb()
-    tries = tries + 1
-    if file_exists(file) or tries >= 10 then start_flight() else after(20, wait_for_thumb) end
-  end
-  after(20, wait_for_thumb)
+  end)
   return true
 end
 
@@ -507,6 +502,7 @@ end
 
 -- Runs shortly after each config load, once windows are known.
 hl.timer(recover_stranded, { timeout = 300, type = "oneshot" })
+hl.exec_cmd("mkdir -p " .. M.thumb_dir)
 
 -- A window in flight swaps in or out without Hyprland's own animation (the
 -- dock's picture is what moves); a hidden one has already arrived but waits,

@@ -89,8 +89,8 @@ Omarchy's window animation speed.
 - **Why 5, and at most 12.** Tiles share the screen width and titles shrink to fit: on a
   1280-wide screen five tiles keep about 22 characters of title, twelve are down to a
   picture and an icon.
-- **The flight starts a moment late.** The window is photographed before its picture
-  takes off, which costs a few tens of milliseconds.
+- **The flight starts about 60 ms after the swipe**, the time it takes to photograph the
+  window before its picture takes off.
 - **A sloppy diagonal swipe** can be read as the other axis. If down/up misfire or feel
   too eager, add `scale = 1.5` (or another value) to those two `hl.gesture` lines in
   `gestures.lua`.
@@ -148,8 +148,9 @@ maximized again just before the reveal, because Hyprland hands a fullscreen stat
 neighbour if a fullscreen window changes workspace.
 
 **The glue.** The minimize logic is a global Lua table (`Minimize`) inside Hyprland's
-own Lua runtime. The gestures call it directly, and the tray calls the same functions
-through `hyprctl dispatch`. Hyprland forgets its Lua state on every config reload, so
+own Lua runtime. The gestures call it directly, and the dock calls the same functions
+through `hyprctl dispatch`. Lua talks to the dock the other way through Hyprland's own
+event socket (the `event` dispatcher), so no process is spawned on the way to the screen. Hyprland forgets its Lua state on every config reload, so
 each window's original size and tiled/maximized state is also written onto the window as
 a tag (`min_...`), which survives reloads. `Widget.qml` owns the settings: it persists
 them in shell.json and runs `threefinger-apply`, which generates the Lua settings file
