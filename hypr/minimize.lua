@@ -514,7 +514,7 @@ hl.window_rule({ match = { tag = "min_hidden" }, opacity = "0 override", no_anim
 -- blur of everything behind it. Omarchy keeps blur switched off globally, so
 -- it is switched on only while the scrim is up and the user's own blur
 -- settings are put back afterwards.
-M.scrim_blur = { size = 2, passes = 1 }  -- light: text behind stays legible
+M.scrim_blur = { size = 1, passes = 1 }  -- light: text behind stays legible
 M.saved_blur = M.saved_blur or nil
 
 function M.scrim(on)
