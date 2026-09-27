@@ -74,6 +74,7 @@ omarchy bar set threefinger.gestures tray_max 8
 | `tray_key` | `"SUPER + M"` | Key that toggles the tray's keyboard. `none` for no key. |
 | `tray_max` | `5` | How many windows the tray holds, 1 to 12. Swipe down on a full tray shows a notification. |
 | `tray_thumbnails` | `true` | A picture of each window in its tile, taken as it minimizes. |
+| `focus_blur` | `false` | While the dock has the keyboard, lightly blur and dim everything else. Empty workspaces stay clear. |
 | `tray_reserve_space` | `false` | `true` makes tiled windows shrink to make room for the tray. `false` floats it over the bottom edge and nothing else moves. |
 
 Settings live in the plugin's entry in `~/.config/omarchy/shell.json`. The generated
@@ -84,8 +85,8 @@ Omarchy's window animation speed.
 ## Good to know
 
 - **The dock takes the keyboard on purpose.** Right after a swipe down, typing goes to
-  the dock until you press Escape. While it does, everything else on screen is lightly
-  blurred and dimmed so that is obvious; a workspace with no windows stays clear, since
+  the dock until you press Escape. Turn on `focus_blur` to make that obvious: everything
+  else on screen is lightly blurred and dimmed while the dock holds the keyboard; a workspace with no windows stays clear, since
   that is where the tiles are headed. Omarchy keeps blur off globally, so it is switched
   on only for that moment and your own blur settings are put back afterwards (strength:
   `M.scrim_blur` in `minimize.lua`). If you would rather it never grabbed the keyboard,

@@ -23,7 +23,7 @@ Panel {
   readonly property var defaults: ({
     minimize: true, swipe_distance: 500, swipe_cancel_ratio: 0.12, swipe_min_speed_to_force: 25,
     slide_speed: 4.5, instant_keyboard_switch: true, persistent_workspaces: 5,
-    tray_key: "SUPER + M", tray_max: 5, tray_thumbnails: true, tray_reserve_space: false
+    tray_key: "SUPER + M", tray_max: 5, tray_thumbnails: true, tray_reserve_space: false, focus_blur: false
   })
   readonly property bool minimizeOn: get("minimize") === true
 
@@ -235,6 +235,11 @@ Panel {
               width: parent.width; label: "Thumbnails"; description: "A picture of each window in its tile. Taken as the window minimizes."
               checked: root.get("tray_thumbnails") === true; foreground: root.foreground; fontFamily: root.fontFamily
               onClicked: root.save({ tray_thumbnails: root.get("tray_thumbnails") !== true })
+            }
+            Toggle {
+              width: parent.width; label: "Blur to match keyboard focus"; description: "While the dock has the keyboard, lightly blur and dim everything else. Empty workspaces stay clear."
+              checked: root.get("focus_blur") === true; foreground: root.foreground; fontFamily: root.fontFamily
+              onClicked: root.save({ focus_blur: root.get("focus_blur") !== true })
             }
             Toggle {
               width: parent.width; label: "Reserve space"; description: "Tiled windows make room for the tray instead of it floating over the bottom edge."

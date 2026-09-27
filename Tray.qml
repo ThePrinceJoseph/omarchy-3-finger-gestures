@@ -33,6 +33,7 @@ Item {
   // From gestures.lua via the settings file.
   property bool reserveSpace: false
   property bool thumbnails: true
+  property bool focusBlur: false
 
   property var windows: []
   property int selectedIndex: -1
@@ -53,6 +54,7 @@ Item {
       var cfg = JSON.parse(text || "{}")
       root.reserveSpace = cfg.reserveSpace === true
       root.thumbnails = cfg.thumbnails !== false
+      root.focusBlur = cfg.focusBlur === true
     } catch (e) {
       root.log("could not parse " + root.settingsPath + ": " + e)
     }
@@ -537,7 +539,7 @@ Item {
     return false
   }
   readonly property bool scrimAnywhere: {
-    if (!root.focusMode || root.windows.length === 0) return false
+    if (!root.focusBlur || !root.focusMode || root.windows.length === 0) return false
     var screens = Quickshell.screens
     for (var i = 0; i < screens.length; i++) if (root.workspaceHasWindows(screens[i])) return true
     return false
@@ -552,7 +554,7 @@ Item {
       id: scrim
       required property var modelData
       screen: modelData
-      visible: root.focusMode && root.windows.length > 0 && root.workspaceHasWindows(scrim.screen)
+      visible: root.focusBlur && root.focusMode && root.windows.length > 0 && root.workspaceHasWindows(scrim.screen)
       anchors { top: true; bottom: true; left: true; right: true }
       color: Qt.rgba(0, 0, 0, 0.08)
       exclusionMode: ExclusionMode.Ignore

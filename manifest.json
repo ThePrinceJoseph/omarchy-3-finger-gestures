@@ -19,7 +19,15 @@
     "displayName": "3 Finger Gestures",
     "description": "Tune the workspace swipe and the minimize tray without leaving the bar.",
     "category": "Input",
-    "aliases": ["gesture", "gestures", "swipe", "minimize", "tray", "touchpad", "trackpad"],
+    "aliases": [
+      "gesture",
+      "gestures",
+      "swipe",
+      "minimize",
+      "tray",
+      "touchpad",
+      "trackpad"
+    ],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
@@ -33,20 +41,100 @@
       "tray_key": "SUPER + M",
       "tray_max": 5,
       "tray_thumbnails": true,
-      "tray_reserve_space": false
+      "tray_reserve_space": false,
+      "focus_blur": false
     },
     "schema": [
-      { "key": "minimize", "type": "boolean", "label": "Minimize gestures", "defaultValue": true, "description": "Three fingers down minimizes into the tray, three fingers up brings it back. Off leaves only the workspace swipe." },
-      { "key": "swipe_distance", "type": "number", "label": "Swipe distance", "defaultValue": 500, "description": "Higher: the screen follows your fingers more slowly." },
-      { "key": "swipe_cancel_ratio", "type": "number", "label": "Swipe commit ratio", "defaultValue": 0.12, "description": "How much of a swipe commits to the next workspace. Lower: less." },
-      { "key": "swipe_min_speed_to_force", "type": "number", "label": "Flick speed", "defaultValue": 25, "description": "A flick faster than this commits regardless of distance." },
-      { "key": "slide_speed", "type": "number", "label": "Glide speed", "defaultValue": 4.5, "description": "Speed of the glide after you let go. Lower: slower. 0: leave Omarchy's animations alone." },
-      { "key": "instant_keyboard_switch", "type": "boolean", "label": "Instant SUPER+1..0", "defaultValue": true, "description": "Keyboard workspace switches skip the glide." },
-      { "key": "persistent_workspaces", "type": "number", "label": "Persistent workspaces", "defaultValue": 5, "description": "Keep workspaces 1..N alive so a swipe visits each one in order and never creates new ones past N. 0 disables." },
-      { "key": "tray_key", "type": "enum", "label": "Tray keyboard key", "options": ["SUPER + M", "SUPER + SHIFT + M", "SUPER + N", "none"], "defaultValue": "SUPER + M", "description": "Hands the keyboard to the tray: Left/Right pick a tile, Enter restores, Escape lets go." },
-      { "key": "tray_max", "type": "number", "label": "Tray capacity", "defaultValue": 5, "description": "How many windows the tray holds (1 to 12)." },
-      { "key": "tray_thumbnails", "type": "boolean", "label": "Thumbnails", "defaultValue": true, "description": "Show a picture of each minimized window in its tile." },
-      { "key": "tray_reserve_space", "type": "boolean", "label": "Reserve space", "defaultValue": false, "description": "Tiled windows shrink to make room for the tray instead of it floating over the bottom edge." }
+      {
+        "key": "minimize",
+        "type": "boolean",
+        "label": "Minimize gestures",
+        "defaultValue": true,
+        "description": "Three fingers down minimizes into the tray, three fingers up brings it back. Off leaves only the workspace swipe."
+      },
+      {
+        "key": "swipe_distance",
+        "type": "number",
+        "label": "Swipe distance",
+        "defaultValue": 500,
+        "description": "Higher: the screen follows your fingers more slowly."
+      },
+      {
+        "key": "swipe_cancel_ratio",
+        "type": "number",
+        "label": "Swipe commit ratio",
+        "defaultValue": 0.12,
+        "description": "How much of a swipe commits to the next workspace. Lower: less."
+      },
+      {
+        "key": "swipe_min_speed_to_force",
+        "type": "number",
+        "label": "Flick speed",
+        "defaultValue": 25,
+        "description": "A flick faster than this commits regardless of distance."
+      },
+      {
+        "key": "slide_speed",
+        "type": "number",
+        "label": "Glide speed",
+        "defaultValue": 4.5,
+        "description": "Speed of the glide after you let go. Lower: slower. 0: leave Omarchy's animations alone."
+      },
+      {
+        "key": "instant_keyboard_switch",
+        "type": "boolean",
+        "label": "Instant SUPER+1..0",
+        "defaultValue": true,
+        "description": "Keyboard workspace switches skip the glide."
+      },
+      {
+        "key": "persistent_workspaces",
+        "type": "number",
+        "label": "Persistent workspaces",
+        "defaultValue": 5,
+        "description": "Keep workspaces 1..N alive so a swipe visits each one in order and never creates new ones past N. 0 disables."
+      },
+      {
+        "key": "tray_key",
+        "type": "enum",
+        "label": "Tray keyboard key",
+        "options": [
+          "SUPER + M",
+          "SUPER + SHIFT + M",
+          "SUPER + N",
+          "none"
+        ],
+        "defaultValue": "SUPER + M",
+        "description": "Hands the keyboard to the tray: Left/Right pick a tile, Enter restores, Escape lets go."
+      },
+      {
+        "key": "tray_max",
+        "type": "number",
+        "label": "Tray capacity",
+        "defaultValue": 5,
+        "description": "How many windows the tray holds (1 to 12)."
+      },
+      {
+        "key": "tray_thumbnails",
+        "type": "boolean",
+        "label": "Thumbnails",
+        "defaultValue": true,
+        "description": "Show a picture of each minimized window in its tile."
+      },
+      {
+        "key": "focus_blur",
+        "type": "boolean",
+        "label": "Blur to match keyboard focus",
+        "defaultValue": false,
+        "description": "While the dock has the keyboard, lightly blur and dim everything else. Empty workspaces stay clear."
+      },
+      {
+        "key": "tray_reserve_space",
+        "type": "boolean",
+        "label": "Reserve space",
+        "defaultValue": false,
+        "description": "Tiled windows shrink to make room for the tray instead of it floating over the bottom edge."
+      }
     ]
   }
 }
