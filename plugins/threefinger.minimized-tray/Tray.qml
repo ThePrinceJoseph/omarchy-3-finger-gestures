@@ -189,6 +189,23 @@ Item {
       "hl.dsp.window.close({ window = hl.get_window('address:" + address + "') })"])
   }
 
+  property var tileItems: ({})
+  function hitTestClose(index) {
+    var tile = root.tileItems[index]
+    if (!tile) return "no tile"
+    var btn = tile.closeButtonItem
+    var pt = btn.mapToItem(tile, btn.width / 2, btn.height / 2)
+    // Walk down from the tile to the deepest child under that point.
+    var item = tile
+    while (true) {
+      var next = item.childAt(pt.x, pt.y)
+      if (!next) break
+      pt = item.mapToItem(next, pt.x, pt.y)
+      item = next
+    }
+    return item === tile.closeMouseItem ? "close" : (item === tile.tileMouseItem ? "tile" : String(item))
+  }
+
   function toggleFocus() {
     if (root.windows.length === 0) {
       root.focusMode = false
@@ -326,7 +343,11 @@ Item {
             required property int index
 
             readonly property bool selected: index === root.selectedIndex
-            readonly property bool hovered: mouse.containsMouse
+            readonly property var closeButtonItem: closeButton
+            readonly property var closeMouseItem: closeMouse
+            readonly property var tileMouseItem: mouse
+            Component.onCompleted: { var t = root.tileItems; t[index] = entry; root.tileItems = t }
+            readonly property bool hovered: mouse.containsMouse || closeMouse.containsMouse
             readonly property bool lit: selected || hovered
             width: content.implicitWidth + Style.space(20)
             height: root.trayHeight - Style.space(10)
@@ -343,6 +364,19 @@ Item {
 
             Behavior on color { ColorAnimation { duration: 120 } }
             Behavior on border.color { ColorAnimation { duration: 120 } }
+
+            // Declared before the content so the ✕ button's own handler sits on top of it.
+            MouseArea {
+              id: mouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+              onEntered: root.setSelected(entry.index)
+              onClicked: function(event) {
+                if (event.button === Qt.MiddleButton) root.closeWindow(entry.modelData.address)
+                else root.restore(entry.modelData.address)
+              }
 
             Row {
               id: content
@@ -373,6 +407,7 @@ Item {
               // Close button: a small ✕ after the title.
               Rectangle {
                 id: closeButton
+                z: 1
                 anchors.verticalCenter: parent.verticalCenter
                 width: Style.space(18)
                 height: width
@@ -400,17 +435,6 @@ Item {
               }
             }
 
-            MouseArea {
-              id: mouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-              onEntered: root.setSelected(entry.index)
-              onClicked: function(event) {
-                if (event.button === Qt.MiddleButton) root.closeWindow(entry.modelData.address)
-                else root.restore(entry.modelData.address)
-              }
             }
           }
         }
@@ -440,5 +464,7 @@ Item {
     function selected(): string { return root.selectedAddress }
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
+    // Debug: what receives a click at the centre of tile <index>'s ✕ ("close" or "tile").
+    function hitTestClose(index: int): string { return root.hitTestClose(index) }
   }
 }

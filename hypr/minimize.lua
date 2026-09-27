@@ -122,6 +122,40 @@ local function forget(addr)
   end
 end
 
+-- Put a window into its remembered end state: tiled or floating at its saved
+-- geometry, maximized/fullscreen if it was, tag removed.
+local function apply_final_state(w, s)
+  clear_state_tag(w)
+  if s.floating == false then
+    hl.dispatch(hl.dsp.window.float({ window = w, action = "disable" }))
+  end
+  if s.maximized then
+    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "set", mode = "maximized" }))
+  elseif s.fullscreen then
+    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "set", mode = "fullscreen" }))
+  end
+end
+
+-- Hyprland drops pending timers when the config reloads. A reload during the
+-- shrink or grow animation leaves a tagged window floating outside the hidden
+-- workspace, as a strip nobody can reach. On every load, put such windows
+-- straight back where they belong (no animation).
+local function recover_stranded()
+  local mon = monitor()
+  for _, w in ipairs(hl.get_windows() or {}) do
+    local s = state_from_tags(w)
+    if s and not (w.workspace and w.workspace.name == M.workspace) then
+      local sw = math.min(s.w or math.floor(mon.w * 0.6), mon.w)
+      local sh = math.min(s.h or math.floor(mon.h * 0.6), mon.h)
+      local ax = mon.x + math.max(0, math.min(s.x or 0, mon.w - sw))
+      local ay = mon.y + math.max(0, math.min(s.y or 0, mon.h - sh))
+      hl.dispatch(hl.dsp.window.resize({ window = w, x = sw, y = sh }))
+      hl.dispatch(hl.dsp.window.move({ window = w, x = ax, y = ay }))
+      apply_final_state(w, s)
+    end
+  end
+end
+
 function M.minimize(w)
   w = w or hl.get_active_window()
   if not w then return false end
@@ -219,15 +253,7 @@ function M.restore(addr)
     after(M.anim_ms, function()
       local w3 = find(addr)
       if not w3 then forget(addr) return end
-      clear_state_tag(w3)
-      if s.floating == false then
-        hl.dispatch(hl.dsp.window.float({ window = w3, action = "disable" }))
-      end
-      if s.maximized then
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w3, action = "set", mode = "maximized" }))
-      elseif s.fullscreen then
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w3, action = "set", mode = "fullscreen" }))
-      end
+      apply_final_state(w3, s)
       M.saved[addr] = nil
       M.busy[addr] = nil
     end)
@@ -277,6 +303,14 @@ function M.restore_selected()
   end
   return M.restore_latest()
 end
+
+-- Restore everything in the tray at once (used by uninstall.sh).
+function M.restore_all()
+  for _, w in ipairs(hl.get_workspace_windows(M.workspace)) do M.restore(w.address) end
+end
+
+-- Runs shortly after each config load, once windows are known.
+hl.timer(recover_stranded, { timeout = 300, type = "oneshot" })
 
 -- The tray slides up from the bottom edge when it appears and back down when
 -- it goes.

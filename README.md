@@ -41,19 +41,20 @@ Uninstall with `./uninstall.sh`. It brings back any windows still in the tray fi
 
 ## Settings
 
-Everything lives in the `opt` table at the top of `~/.config/hypr/gestures.lua`.
-Save the file and Hyprland reloads by itself.
+Everything lives in `~/.config/hypr/gestures-settings.lua`. The installer creates it
+once and never overwrites it, so updates keep your tuning. Save the file and Hyprland
+reloads by itself. Delete a line to go back to that setting's default.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `swipe_distance` | `500` | Higher = the screen follows your fingers more slowly. |
 | `swipe_cancel_ratio` | `0.12` | How much of a swipe commits to the next workspace. Lower = less. |
 | `swipe_min_speed_to_force` | `25` | A flick faster than this commits regardless of distance. |
-| `slide_speed` | `4.5` | Glide speed after you let go. Lower = slower. `nil` leaves Omarchy's animations alone. |
+| `slide_speed` | `4.5` | Glide speed after you let go. Lower = slower. `false` leaves Omarchy's animations alone. |
 | `instant_keyboard_switch` | `true` | Keep SUPER+1..0 instant even though swiping glides. |
 | `persistent_workspaces` | `5` | Keep workspaces 1..N alive so a swipe visits each one and stops at N. `0` to disable. |
 | `minimize` | `true` | The down/up gestures and the tray. `false` for the workspace swipe only. |
-| `tray_key` | `"SUPER + M"` | Key that toggles the tray's keyboard. `nil` for none. |
+| `tray_key` | `"SUPER + M"` | Key that toggles the tray's keyboard. `false` for none. |
 
 Two more knobs sit at the top of `minimize.lua`: `anim_ms` (how long the shrink and
 grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.qml`).
@@ -69,15 +70,17 @@ grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.
   ExclusionMode.Ignore` in `Tray.qml`.
 - **A sloppy diagonal swipe** can be read as the other axis. If down/up misfire or
   feel too eager, add `scale = 1.5` (or another value) to those two `hl.gesture`
-  lines in `gestures.lua`.
+  lines in `gestures.lua` (the installer backs that file up before replacing it).
 - **Editing `Tray.qml`** hot-reloads, but the shell sometimes keeps the old copy
   answering. `omarchy restart shell` fixes that.
 - **Something stuck in the hidden workspace?** This brings everything back to the
-  current workspace:
+  current workspace, properly sized and tiled:
 
   ```bash
-  hyprctl dispatch "(function() for _, w in ipairs(hl.get_workspace_windows('special:minimized')) do hl.dispatch(hl.dsp.window.move({ window = w, workspace = '+0' })) end return hl.dsp.no_op() end)()"
+  hyprctl dispatch "(function() Minimize.restore_all() return hl.dsp.no_op() end)()"
   ```
+- **Hyprland reloaded mid-animation?** Each window carries its saved state as a tag, and
+  `minimize.lua` puts any stranded window straight back in place the next time it loads.
 
 ## How it works
 
