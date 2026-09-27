@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "threefinger.gestures",
+  "name": "3 Finger Gestures",
+  "version": "2.0.0",
+  "author": "Joey Morrison",
+  "license": "MIT",
+  "description": "Three-finger touchpad gestures for Omarchy: swipe sideways to change workspace, swipe down to minimize a window into a bottom tray, swipe up to bring it back. Settings live in the bar.",
+  "kinds": [
+    "bar-widget",
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "Widget.qml",
+    "panel": "Tray.qml"
+  },
+  "barWidget": {
+    "displayName": "3 Finger Gestures",
+    "description": "Tune the workspace swipe and the minimize tray without leaving the bar.",
+    "category": "Input",
+    "aliases": ["gesture", "gestures", "swipe", "minimize", "tray", "touchpad", "trackpad"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "minimize": true,
+      "swipe_distance": 500,
+      "swipe_cancel_ratio": 0.12,
+      "swipe_min_speed_to_force": 25,
+      "slide_speed": 4.5,
+      "instant_keyboard_switch": true,
+      "persistent_workspaces": 5,
+      "tray_key": "SUPER + M",
+      "tray_max": 5,
+      "tray_thumbnails": true,
+      "tray_height": 0,
+      "tray_reserve_space": false
+    },
+    "schema": [
+      { "key": "minimize", "type": "boolean", "label": "Minimize gestures", "defaultValue": true, "description": "Three fingers down minimizes into the tray, three fingers up brings it back. Off leaves only the workspace swipe." },
+      { "key": "swipe_distance", "type": "number", "label": "Swipe distance", "defaultValue": 500, "description": "Higher: the screen follows your fingers more slowly." },
+      { "key": "swipe_cancel_ratio", "type": "number", "label": "Swipe commit ratio", "defaultValue": 0.12, "description": "How much of a swipe commits to the next workspace. Lower: less." },
+      { "key": "swipe_min_speed_to_force", "type": "number", "label": "Flick speed", "defaultValue": 25, "description": "A flick faster than this commits regardless of distance." },
+      { "key": "slide_speed", "type": "number", "label": "Glide speed", "defaultValue": 4.5, "description": "Speed of the glide after you let go. Lower: slower. 0: leave Omarchy's animations alone." },
+      { "key": "instant_keyboard_switch", "type": "boolean", "label": "Instant SUPER+1..0", "defaultValue": true, "description": "Keyboard workspace switches skip the glide." },
+      { "key": "persistent_workspaces", "type": "number", "label": "Persistent workspaces", "defaultValue": 5, "description": "Keep workspaces 1..N alive so a swipe visits each one in order and never creates new ones past N. 0 disables." },
+      { "key": "tray_key", "type": "enum", "label": "Tray keyboard key", "options": ["SUPER + M", "SUPER + SHIFT + M", "SUPER + N", "none"], "defaultValue": "SUPER + M", "description": "Hands the keyboard to the tray: Left/Right pick a tile, Enter restores, Escape lets go." },
+      { "key": "tray_max", "type": "number", "label": "Tray capacity", "defaultValue": 5, "description": "How many windows the tray holds (1 to 12)." },
+      { "key": "tray_thumbnails", "type": "boolean", "label": "Thumbnails", "defaultValue": true, "description": "Show a picture of each minimized window in its tile." },
+      { "key": "tray_height", "type": "number", "label": "Tray height", "defaultValue": 0, "description": "Pixels. 0 picks 72 with thumbnails, 40 without." },
+      { "key": "tray_reserve_space", "type": "boolean", "label": "Reserve space", "defaultValue": false, "description": "Tiled windows shrink to make room for the tray instead of it floating over the bottom edge." }
+    ]
+  }
+}

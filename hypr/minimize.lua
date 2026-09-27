@@ -31,6 +31,8 @@ M.max_windows = M.max_windows or 5  -- tray capacity, 1..12 (gestures.lua sets i
 M.op = M.op or {}         -- address -> operation token; bumped on close so stale timers do nothing
 M.pending = M.pending or 0          -- minimizes started but not yet landed in the tray
 M.shutting_down = false             -- set by M.shutdown(); refuses new minimizes
+M.thumbnails = M.thumbnails or false -- grab a picture of each window for its tray tile (gestures.lua sets it)
+M.thumb_dir = os.getenv("HOME") .. "/.cache/threefinger-tray"
 
 local function vec(v)
   if type(v) ~= "table" then return 0, 0 end
@@ -129,7 +131,18 @@ local function begin(addr)
   return M.op[addr]
 end
 
+local function thumb_path(addr)
+  return M.thumb_dir .. "/" .. addr:gsub("[^%w]", "") .. ".jpg"
+end
+
+local function file_exists(path)
+  local f = io.open(path, "r")
+  if f then f:close() return true end
+  return false
+end
+
 local function forget(addr)
+  os.remove(thumb_path(addr))
   M.op[addr] = (M.op[addr] or 0) + 1
   M.saved[addr] = nil
   M.busy[addr] = nil
@@ -187,7 +200,7 @@ function M.minimize(w)
     local stashed = #hl.get_workspace_windows(M.workspace) + M.pending
     if stashed >= M.max_windows then
       notify("Tray is full: " .. M.max_windows .. " windows max",
-        "Bring one back first, or change tray_max in ~/.config/hypr/gestures-settings.lua")
+        "Bring one back first, or raise Tray capacity in the 3 Finger Gestures bar widget.")
       return false
     end
   end
@@ -210,29 +223,14 @@ function M.minimize(w)
   clear_state_tag(w)
   hl.dispatch(hl.dsp.window.tag({ window = w, tag = "+" .. state_tag(state) }))
 
-  -- Let go of maximize/fullscreen, float the window and, in the same breath,
-  -- aim it at the tray strip: Hyprland animates from where the window is now
-  -- straight to the strip, and the neighbours re-tile in step with it.
-  if w.fullscreen == 1 then
-    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "unset", mode = "maximized" }))
-  elseif w.fullscreen == 2 then
-    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "unset", mode = "fullscreen" }))
-  end
-  if not w.floating then
-    hl.dispatch(hl.dsp.window.float({ window = w, action = "enable" }))
-  end
-  local tx, ty, tw, th = tray_target(ax, sw, mon)
-  -- resize first: Hyprland keeps the centre on resize, then move pins the spot
-  hl.dispatch(hl.dsp.window.resize({ window = w, x = tw, y = th }))
-  hl.dispatch(hl.dsp.window.move({ window = w, x = tx, y = ty }))
-
   local function put_back(win)
     hl.dispatch(hl.dsp.window.resize({ window = win, x = sw, y = sh }))
     hl.dispatch(hl.dsp.window.move({ window = win, x = ax, y = ay }))
     apply_final_state(win, state)
   end
-  -- Once it has landed on the strip, stash it.
-  after(M.anim_ms, function()
+
+  -- Once the window has landed on the strip, tuck it into the hidden workspace.
+  local function stash()
     M.pending = math.max(0, M.pending - 1)
     if M.op[addr] ~= token then return end
     local w3 = find(addr)
@@ -246,7 +244,47 @@ function M.minimize(w)
     hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
     table.insert(M.stack, addr)
     M.busy[addr] = nil
-  end)
+  end
+
+  local function start_animation()
+    local win = find(addr)
+    if M.op[addr] ~= token or not win then M.pending = math.max(0, M.pending - 1) return end
+    if M.shutting_down then M.pending = math.max(0, M.pending - 1) forget(addr) return end
+    -- Let go of maximize/fullscreen, float the window and, in the same breath,
+    -- aim it at the tray strip: Hyprland animates from where the window is now
+    -- straight to the strip, and the neighbours re-tile in step with it.
+    if win.fullscreen == 1 then
+      hl.dispatch(hl.dsp.window.fullscreen({ window = win, action = "unset", mode = "maximized" }))
+    elseif win.fullscreen == 2 then
+      hl.dispatch(hl.dsp.window.fullscreen({ window = win, action = "unset", mode = "fullscreen" }))
+    end
+    if not win.floating then
+      hl.dispatch(hl.dsp.window.float({ window = win, action = "enable" }))
+    end
+    local tx, ty, tw, th = tray_target(ax, sw, mon)
+    -- resize first: Hyprland keeps the centre on resize, then move pins the spot
+    hl.dispatch(hl.dsp.window.resize({ window = win, x = tw, y = th }))
+    hl.dispatch(hl.dsp.window.move({ window = win, x = tx, y = ty }))
+    after(M.anim_ms, stash)
+  end
+
+  -- Thumbnail: ask grim for a small picture of the window as it is now, and
+  -- start the animation as soon as the file exists (grim grabs its frame
+  -- before it writes, so the picture is never mid-shrink). Waiting is capped
+  -- at ~160 ms so a slow capture cannot stall the gesture.
+  if M.thumbnails then
+    local file = thumb_path(addr)
+    os.remove(file)
+    hl.exec_cmd(string.format("mkdir -p %q && grim -g '%d,%d %dx%d' -s 0.3 -t jpeg -q 80 %q", M.thumb_dir, ax, ay, sw, sh, file))
+    local tries = 0
+    local function wait_for_thumb()
+      tries = tries + 1
+      if file_exists(file) or tries >= 8 then start_animation() else after(20, wait_for_thumb) end
+    end
+    after(20, wait_for_thumb)
+  else
+    start_animation()
+  end
   return true
 end
 
@@ -309,6 +347,7 @@ function M.restore(addr)
       local w3 = find(addr)
       if not w3 then forget(addr) return end
       if s.floating then clear_state_tag(w3) elseif big then apply_final_state(w3, s) end
+      os.remove(thumb_path(addr))
       M.saved[addr] = nil
       M.busy[addr] = nil
     end)

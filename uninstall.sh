@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# Removes Omarchy 3 Finger Gestures. Any still-minimized windows are brought
-# back to the current workspace first.
-set -euo pipefail
-
+# Removes 3 Finger Gestures. Windows still in the tray are brought back first.
+set -uo pipefail
+id="threefinger.gestures"
 hypr="$HOME/.config/hypr"
-plugins="$HOME/.config/omarchy/plugins"
-id="threefinger.minimized-tray"
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# Rescue minimized windows before the tray goes away: a full restore (size,
-# tiling, maximize) while minimize.lua is still loaded, else a plain move back.
 hyprctl dispatch "(function()
   if Minimize and Minimize.shutdown then Minimize.shutdown() return hl.dsp.no_op() end
   for _, w in ipairs(hl.get_workspace_windows('special:minimized')) do
@@ -17,21 +13,22 @@ hyprctl dispatch "(function()
   end
   return hl.dsp.no_op()
 end)()" >/dev/null 2>&1 || true
-sleep 1.5  # let the restore animations finish before the code goes away
+sleep 1.5
 
-if [[ -f "$hypr/hyprland.lua" ]]; then
-  stamp=$(date +%s)
-  cp "$hypr/hyprland.lua" "$hypr/hyprland.lua.bak.$stamp"
-  sed -i '/^require("hypr\.minimize")$/d; /^require("hypr\.gestures")$/d' "$hypr/hyprland.lua"
-  echo "removed the require lines from hyprland.lua (backup: hyprland.lua.bak.$stamp)"
-fi
+"$here/threefinger-require" --remove 2>/dev/null || true
 rm -f "$hypr/minimize.lua" "$hypr/gestures.lua" "$hypr/gestures-settings.lua"
-rm -f "$HOME/.local/state/omarchy/minimized-tray-selected"
+rm -f "$HOME/.local/state/omarchy/minimized-tray-selected" "$HOME/.local/state/omarchy/minimized-tray-settings.json"
+rm -rf "$HOME/.cache/threefinger-tray"
+hyprctl reload >/dev/null 2>&1 || true
 
 omarchy plugin disable "$id" >/dev/null 2>&1 || true
-rm -rf "${plugins:?}/$id"
+if [[ "$here" == "$HOME/.config/omarchy/plugins/$id" ]]; then
+  # Running from the installed copy: let the shell forget it, then remove the files.
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  cd / && rm -rf "$here"
+else
+  rm -rf "$HOME/.config/omarchy/plugins/$id"
+fi
 omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
 omarchy restart shell >/dev/null 2>&1 || true
-
-hyprctl reload >/dev/null 2>&1 || true
-echo "Omarchy 3 Finger Gestures removed. Hyprland's built-in defaults are back."
+echo "3 Finger Gestures removed. Hyprland's built-in defaults are back."

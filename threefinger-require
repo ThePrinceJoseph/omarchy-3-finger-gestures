@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Make sure ~/.config/hypr/hyprland.lua loads the gesture modules, through a
+# marked block that uninstall can take out again. pcall means a missing file
+# never breaks Hyprland's config. The block goes last on purpose: Hyprland
+# cannot unbind a gesture, the first registration of an axis wins, so a
+# hand-written gesture in input.lua quietly takes precedence over ours.
+#   threefinger-require            add the block (idempotent)
+#   threefinger-require --remove   take it out
+set -uo pipefail
+CONFIG="${THREEFINGER_HYPRLAND:-$HOME/.config/hypr/hyprland.lua}"
+BEGIN="-- threefinger:begin (managed by threefinger.gestures — do not edit)"
+END="-- threefinger:end"
+[[ -f $CONFIG ]] || { echo "threefinger-require: $CONFIG not found" >&2; exit 1; }
+write_atomic() {
+  local tmp; tmp="$(mktemp "$(dirname -- "$CONFIG")/.threefinger.XXXXXX")" || exit 1
+  chmod 644 "$tmp"; cat > "$tmp"; mv -f "$tmp" "$CONFIG"
+}
+if [[ ${1:-} == --remove ]]; then
+  grep -qF "threefinger:begin" "$CONFIG" || exit 0
+  awk -v b="threefinger:begin" -v e="threefinger:end" '
+    index($0, b) { skip = 1 }
+    !skip        { lines[++n] = $0 }
+    index($0, e) { skip = 0 }
+    END { while (n > 0 && lines[n] == "") n--; for (i = 1; i <= n; i++) print lines[i] }
+  ' "$CONFIG" | write_atomic
+  echo "threefinger-require: removed the require block from $CONFIG"
+  exit 0
+fi
+grep -qF "threefinger:begin" "$CONFIG" && exit 0
+{ cat -- "$CONFIG"; printf '\n%s\n' "$BEGIN"; printf '%s\n' 'pcall(require, "hypr.minimize")' 'pcall(require, "hypr.gestures")'; printf '%s\n' "$END"; } | write_atomic
+echo "threefinger-require: added the require block to $CONFIG"

@@ -6,36 +6,23 @@
 --   down          minimize the focused window into a tray at the bottom
 --   up            bring the selected minimized window back (see minimize.lua)
 --
--- Settings: edit ~/.config/hypr/gestures-settings.lua (the installer creates it
--- once and never overwrites it). The values below are the defaults.
--- Check for mistakes with:  hyprctl configerrors
+-- Settings come from the bar widget (or `omarchy bar set threefinger.gestures
+-- <key> <value>`), which writes ~/.config/hypr/gestures-settings.lua through
+-- threefinger-apply. The values below are the defaults used when that file is
+-- missing. Check for mistakes with:  hyprctl configerrors
 
 local defaults = {
-  -- Workspace swipe feel. Higher distance = the screen follows your fingers
-  -- more slowly; lower cancel_ratio = less of a swipe commits to the next
-  -- workspace; a quick flick above min_speed commits regardless.
   swipe_distance = 500,
   swipe_cancel_ratio = 0.12,
   swipe_min_speed_to_force = 25,
-  -- Glide into place after you let go (Omarchy turns this animation off by
-  -- default). Lower speed = slower slide. `false` leaves animations alone.
-  slide_speed = 4.5,
-  -- Keep SUPER+1..0 instant even though swiping glides.
+  slide_speed = 4.5,            -- 0 or false: leave Omarchy's animations alone
   instant_keyboard_switch = true,
-  -- Keep workspaces 1..N alive even when empty, so a swipe visits each one in
-  -- order and stops at N. 0 disables.
-  persistent_workspaces = 5,
-  -- The minimize gestures and their tray. false = workspace swipe only.
+  persistent_workspaces = 5,    -- 0 disables
   minimize = true,
-  -- Key that hands the keyboard to the tray. false = no key.
-  tray_key = "SUPER + M",
-  -- How many windows the tray holds before swipe down says "full" (1..12).
-  tray_max = 5,
-  -- Tray height in logical pixels.
-  tray_height = 40,
-  -- true: the tray reserves space like the bar (tiled windows shrink to make
-  -- room whenever it appears or disappears). false: it floats over the bottom
-  -- edge, and nothing else moves.
+  tray_key = "SUPER + M",       -- false: no key
+  tray_max = 5,                 -- 1..12
+  tray_thumbnails = true,
+  tray_height = 0,              -- 0: 72 with thumbnails, 40 without
   tray_reserve_space = false,
 }
 
@@ -67,11 +54,11 @@ hl.config({
   },
 })
 
-if opt.slide_speed and opt.slide_speed ~= false then
+if opt.slide_speed and opt.slide_speed ~= false and tonumber(opt.slide_speed) and tonumber(opt.slide_speed) > 0 then
   hl.animation({ leaf = "workspaces", enabled = true, speed = opt.slide_speed, bezier = "easeOutQuint", style = "slide" })
 end
 
-if opt.slide_speed and opt.instant_keyboard_switch then
+if opt.slide_speed and opt.slide_speed ~= false and tonumber(opt.slide_speed) and tonumber(opt.slide_speed) > 0 and opt.instant_keyboard_switch then
   -- Switch off the slide for the duration of a keyboard switch, then put it back.
   local function instant_workspace(workspace)
     return function()
@@ -97,16 +84,20 @@ end
 
 if opt.minimize and Minimize then
   Minimize.max_windows = math.max(1, math.min(12, math.floor(tonumber(opt.tray_max) or 5)))
-  Minimize.tray_height = math.max(24, math.floor(tonumber(opt.tray_height) or 40))
+  Minimize.thumbnails = opt.tray_thumbnails and true or false
+  local height = math.floor(tonumber(opt.tray_height) or 0)
+  if height <= 0 then height = Minimize.thumbnails and 72 or 40 end
+  Minimize.tray_height = math.max(24, height)
   -- The tray plugin reads its look from this file (it watches for changes).
   local f = io.open(os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-settings.json", "w")
   if f then
-    f:write(string.format('{"height": %d, "reserveSpace": %s}\n', Minimize.tray_height, opt.tray_reserve_space and "true" or "false"))
+    f:write(string.format('{"height": %d, "reserveSpace": %s, "thumbnails": %s}\n',
+      Minimize.tray_height, opt.tray_reserve_space and "true" or "false", Minimize.thumbnails and "true" or "false"))
     f:close()
   end
   hl.gesture({ fingers = 3, direction = "down", action = function() Minimize.minimize() end })
   hl.gesture({ fingers = 3, direction = "up", action = function() Minimize.restore_selected() end })
-  if opt.tray_key then
+  if opt.tray_key and opt.tray_key ~= "" and opt.tray_key ~= "none" then
     o.bind(opt.tray_key, "Minimized tray: toggle keyboard", "omarchy-shell minimized-tray focus")
   end
 elseif opt.minimize then

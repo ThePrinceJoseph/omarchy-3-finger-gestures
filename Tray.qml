@@ -5,8 +5,8 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
 
-// Tray for windows minimized with the three-finger swipe (see
-// ~/.config/hypr/minimize.lua, part of Omarchy 3 Finger Gestures). Shows at the bottom of the screen while the
+// 3 Finger Gestures: the tray for minimized windows (the Lua half lives in
+// hypr/minimize.lua, installed to ~/.config/hypr/). Shows at the bottom of the screen while the
 // hidden workspace `special:minimized` holds any windows.
 //
 // Selection: hovering a tile selects it. The tray takes the keyboard as soon
@@ -27,6 +27,8 @@ Item {
   // Height and reserve-space come from gestures.lua via a small state file.
   property int trayHeight: Style.space(40)
   property bool reserveSpace: false
+  property bool thumbnails: false
+  readonly property string thumbDir: Quickshell.env("HOME") + "/.cache/threefinger-tray"
   readonly property string settingsPath: Quickshell.env("HOME") + "/.local/state/omarchy/minimized-tray-settings.json"
 
   function applySettings(text) {
@@ -34,6 +36,7 @@ Item {
       var cfg = JSON.parse(text || "{}")
       if (cfg.height > 0) root.trayHeight = Style.space(cfg.height)
       root.reserveSpace = cfg.reserveSpace === true
+      root.thumbnails = cfg.thumbnails === true
     } catch (e) {
       root.log("could not parse " + root.settingsPath + ": " + e)
     }
@@ -133,6 +136,7 @@ Item {
         title: String(c.title || c["class"] || "Window"),
         appClass: String(c["class"] || ""),
         icon: root.iconFor(c),
+        thumb: root.thumbnails ? ("file://" + root.thumbDir + "/" + address.replace(/[^0-9a-zA-Z]/g, "") + ".jpg") : "",
         order: seen[address]
       })
     }
@@ -415,13 +419,34 @@ Item {
 
             readonly property int pad: Style.space(10)
             readonly property int gap: Style.space(8)
-            readonly property int naturalWidth: pad + icon.width + gap + Math.ceil(title.implicitWidth) + gap + closeButton.width + pad
-            // Smallest useful tile: icon and ✕ with no title.
-            readonly property int minWidth: pad + icon.width + gap + closeButton.width + pad
+            readonly property bool hasThumb: thumb.visible
+            readonly property int thumbSlot: hasThumb ? thumb.width + gap : 0
+            readonly property int naturalWidth: pad + thumbSlot + icon.width + gap + Math.ceil(title.implicitWidth) + gap + closeButton.width + pad
+            // Smallest useful tile: (thumbnail,) icon and ✕ with no title.
+            readonly property int minWidth: pad + thumbSlot + icon.width + gap + closeButton.width + pad
+
+            // Picture of the window, taken as it was minimized. Hidden when
+            // thumbnails are off or the capture is missing.
+            Image {
+              id: thumb
+              anchors { left: parent.left; leftMargin: entry.pad; verticalCenter: parent.verticalCenter }
+              readonly property int boxHeight: entry.height - Style.space(8)
+              height: boxHeight
+              width: status === Image.Ready && implicitHeight > 0
+                ? Math.max(Style.space(24), Math.min(Math.round(boxHeight * 16 / 9), Math.round(boxHeight * implicitWidth / implicitHeight)))
+                : 0
+              visible: root.thumbnails && entry.modelData.thumb !== "" && status === Image.Ready
+              source: entry.modelData.thumb
+              cache: false
+              asynchronous: true
+              fillMode: Image.PreserveAspectCrop
+              smooth: true
+              layer.enabled: visible && Style.cornerRadius > 0
+            }
 
             Image {
               id: icon
-              anchors { left: parent.left; leftMargin: entry.pad; verticalCenter: parent.verticalCenter }
+              anchors { left: entry.hasThumb ? thumb.right : parent.left; leftMargin: entry.hasThumb ? entry.gap : entry.pad; verticalCenter: parent.verticalCenter }
               width: Style.space(20)
               height: width
               source: entry.modelData.icon
