@@ -29,6 +29,8 @@ Panel {
 
   // Windows currently in the tray, for the badge on the bar button.
   property int minimizedCount: 0
+  // A value field is being typed into: keep the popup's key handling off it.
+  property bool editingValue: false
 
   function get(key) { return root.setting(key, root.defaults[key]) }
 
@@ -137,6 +139,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: root.editingValue
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
@@ -269,15 +272,70 @@ Panel {
       width: parent.width
       height: labelText.implicitHeight
       Text { id: labelText; text: row.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; anchors.left: parent.left; width: parent.width - valueText.width - Style.space(8); elide: Text.ElideRight }
-      // Live readout: the value under your finger while dragging, else the set one.
-      Text {
+      // Live readout: the value under your finger while dragging, else the set
+      // one. Click it to type a value (up to two decimals, 0 to 1).
+      Item {
         id: valueText
         anchors.right: parent.right
-        text: row.text(row.shown) + (Math.abs(row.shown - row.recommended) < 0.001 ? "  ✓" : "")
-        color: slider.dragging ? Color.accent : root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: slider.dragging
+        width: Math.max(readout.implicitWidth, editBox.width)
+        height: labelText.implicitHeight
+        property bool editing: false
+        function startEdit() {
+          editField.text = row.text(row.shown) === row.zeroText ? "0.00" : row.shown.toFixed(2)
+          valueText.editing = true
+          root.editingValue = true
+          editField.forceActiveFocus()
+          editField.selectAll()
+        }
+        function finishEdit(commit) {
+          if (commit) {
+            var v = parseFloat(editField.text)
+            if (!isNaN(v)) row.committed(Math.max(0, Math.min(1, Math.round(v * 100) / 100)))
+          }
+          valueText.editing = false
+          root.editingValue = false
+        }
+        Text {
+          id: readout
+          anchors.right: parent.right
+          visible: !valueText.editing
+          text: row.text(row.shown) + (Math.abs(row.shown - row.recommended) < 0.001 ? "  ✓" : "")
+          color: slider.dragging ? Color.accent : (readoutMouse.containsMouse ? Color.accent : root.foreground)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: slider.dragging
+          font.underline: readoutMouse.containsMouse
+        }
+        MouseArea { id: readoutMouse; anchors.fill: readout; hoverEnabled: true; cursorShape: Qt.IBeamCursor; visible: !valueText.editing; onClicked: valueText.startEdit() }
+        Rectangle {
+          id: editBox
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          visible: valueText.editing
+          width: Style.space(56)
+          height: labelText.implicitHeight + Style.space(6)
+          radius: Style.space(4)
+          color: Util.alpha(Color.accent, 0.12)
+          border.width: 1
+          border.color: Color.accent
+          TextInput {
+            id: editField
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(6)
+            anchors.rightMargin: Style.space(6)
+            verticalAlignment: TextInput.AlignVCenter
+            horizontalAlignment: TextInput.AlignRight
+            color: root.foreground
+            selectionColor: Util.alpha(Color.accent, 0.5)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            // Only shapes like 0.47, .5, 1, 1.00 — two decimals at most.
+            validator: RegularExpressionValidator { regularExpression: /^(0?\.[0-9]{0,2}|0|1(\.0{0,2})?)$/ }
+            onAccepted: valueText.finishEdit(true)
+            Keys.onEscapePressed: valueText.finishEdit(false)
+            onActiveFocusChanged: if (!activeFocus && valueText.editing) valueText.finishEdit(true)
+          }
+        }
       }
     }
 
@@ -296,18 +354,35 @@ Panel {
         value: row.value
         onReleased: function(v) { row.committed(root.snap(v)) }
       }
-      // Recommended stop: a small marker under the track. Click it to go back.
+      // Recommended stop: a marker under the track. Click it to go back.
       Item {
+        id: marker
         readonly property real frac: row.recommended
-        x: slider.x + slider.knobSize / 2 + frac * (slider.width - slider.knobSize) - width / 2
+        readonly property real centreX: slider.x + slider.knobSize / 2 + frac * (slider.width - slider.knobSize)
+        // Keep the label inside the row: it hangs right of the arrow unless
+        // that would run off the edge, then left.
+        readonly property bool labelRight: centreX + Style.space(10) + markerLabel.implicitWidth < parent.width
+        x: labelRight ? centreX - Style.space(7) : centreX + Style.space(7) - width
         anchors.top: parent.verticalCenter
         anchors.topMargin: slider.trackHeight / 2 + Style.space(3)
-        width: Style.space(14)
+        width: Style.space(14) + Style.space(4) + markerLabel.implicitWidth
         height: Style.space(12)
+        readonly property color tone: Math.abs(row.shown - row.recommended) < 0.001 ? Color.accent : root.dim
         Text {
-          anchors.centerIn: parent
+          id: markerArrow
+          x: marker.labelRight ? 0 : parent.width - width
+          anchors.verticalCenter: parent.verticalCenter
           text: "▲"
-          color: Math.abs(row.shown - row.recommended) < 0.001 ? Color.accent : root.dim
+          color: marker.tone
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Text {
+          id: markerLabel
+          x: marker.labelRight ? markerArrow.width + Style.space(4) : 0
+          anchors.verticalCenter: parent.verticalCenter
+          text: "recommended"
+          color: marker.tone
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
@@ -317,9 +392,9 @@ Panel {
 
     Item {
       width: parent.width
-      height: lowText.implicitHeight
-      Text { id: lowText; text: row.low; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.left: parent.left; anchors.leftMargin: Style.space(6) }
-      Text { text: row.high; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.right: parent.right; anchors.rightMargin: Style.space(6) }
+      height: lowText.implicitHeight + Style.space(6)
+      Text { id: lowText; anchors.bottom: parent.bottom; text: row.low; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.left: parent.left; anchors.leftMargin: Style.space(6) }
+      Text { anchors.bottom: parent.bottom; text: row.high; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.right: parent.right; anchors.rightMargin: Style.space(6) }
     }
   }
 

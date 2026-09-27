@@ -5,17 +5,19 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
 
-// 3 Finger Gestures: the tray for minimized windows (the Lua half lives in
-// hypr/minimize.lua, installed to ~/.config/hypr/). Shows at the bottom of the screen while the
-// hidden workspace `special:minimized` holds any windows.
+// 3 Finger Gestures: the dock for minimized windows (the Lua half lives in
+// hypr/minimize.lua, installed to ~/.config/hypr/). A floating, centred card
+// along the bottom that only exists while the hidden workspace
+// `special:minimized` holds windows. One tile per window: a picture of it,
+// its app icon and title. The selected tile carries an accent border and a
+// dot; hovering shows a larger preview above the dock and a ✕ to close.
 //
-// Selection: hovering a tile selects it. The tray takes the keyboard as soon
-// as a tile lands in it (and on SUPER+M), so Left/Right (or Tab) move the
-// selection, Enter/Up restores, Backspace/Delete closes. Escape, Down or
-// SUPER+M hand the keyboard back; restoring a tile or emptying the tray does
-// too. The selected tile is what a three-finger swipe up brings back (its
-// address is written to `selectedPath`, which minimize.lua reads). Left-click
-// restores a tile, the ✕ on it (or middle-click) closes it.
+// Selection: hovering selects. The dock takes the keyboard as soon as a tile
+// lands (and on the tray key), so Left/Right (or Tab) move the selection,
+// Enter/Up restores, Backspace/Delete closes. Escape, Down or the tray key
+// hand the keyboard back; restoring a tile or emptying the dock does too.
+// The selected tile is what a three-finger swipe up brings back (its address
+// is written to `selectedPath`, which minimize.lua reads).
 
 Item {
   id: root
@@ -24,30 +26,20 @@ Item {
   property var shell: null
 
   readonly property string minimizedWorkspace: "special:minimized"
-  // Height and reserve-space come from gestures.lua via a small state file.
-  property int trayHeight: Style.space(40)
-  property bool reserveSpace: false
-  property bool thumbnails: false
-  readonly property string thumbDir: Quickshell.env("HOME") + "/.cache/threefinger-tray"
-  readonly property string settingsPath: Quickshell.env("HOME") + "/.local/state/omarchy/minimized-tray-settings.json"
-
-  function applySettings(text) {
-    try {
-      var cfg = JSON.parse(text || "{}")
-      if (cfg.height > 0) root.trayHeight = Style.space(cfg.height)
-      root.reserveSpace = cfg.reserveSpace === true
-      root.thumbnails = cfg.thumbnails === true
-    } catch (e) {
-      root.log("could not parse " + root.settingsPath + ": " + e)
-    }
-  }
-  // Keep in sync with M.selected_path in minimize.lua.
   readonly property string selectedPath: Quickshell.env("HOME") + "/.local/state/omarchy/minimized-tray-selected"
+  readonly property string settingsPath: Quickshell.env("HOME") + "/.local/state/omarchy/minimized-tray-settings.json"
+  readonly property string thumbDir: Quickshell.env("HOME") + "/.cache/threefinger-tray"
+
+  // From gestures.lua via the settings file.
+  property bool reserveSpace: false
+  property bool thumbnails: true
+  property int tileWidthSetting: 0   // 0 = automatic
 
   property var windows: []
   property int selectedIndex: -1
   property bool focusMode: false
-  // Order tiles by when they were first seen, so the newest sits at the right.
+  property int hoverIndex: -1
+  property int previewIndex: -1
   property var firstSeen: ({})
   property int seenCounter: 0
   property bool refreshPending: false
@@ -55,8 +47,17 @@ Item {
   readonly property string selectedAddress: (selectedIndex >= 0 && selectedIndex < windows.length)
     ? windows[selectedIndex].address : ""
 
-  function log(message) {
-    console.log("minimized-tray " + message)
+  function log(message) { console.log("minimized-tray " + message) }
+
+  function applySettings(text) {
+    try {
+      var cfg = JSON.parse(text || "{}")
+      root.reserveSpace = cfg.reserveSpace === true
+      root.thumbnails = cfg.thumbnails !== false
+      root.tileWidthSetting = cfg.height > 0 ? 0 : 0
+    } catch (e) {
+      root.log("could not parse " + root.settingsPath + ": " + e)
+    }
   }
 
   // Browser web apps (Omarchy's `omarchy-launch-webapp`, Chrome's "install as
@@ -105,6 +106,15 @@ Item {
     return Quickshell.iconPath("application-x-executable", true)
   }
 
+  function isMinimized(list, address) {
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i]
+      if (c && String(c.address) === address)
+        return !!c.workspace && c.workspace.name === root.minimizedWorkspace
+    }
+    return false
+  }
+
   function parseClients(text) {
     var list
     try {
@@ -119,9 +129,9 @@ Item {
     var restored = false
     var alive = ({})
     for (var a = 0; a < list.length; a++) if (list[a] && list[a].address) alive[String(list[a].address)] = true
-    // A tile that left the tray but whose window still exists was restored
-    // (by swipe, click or Enter): the tray is done, hand the keyboard back.
-    // A closed window just disappears and the tray stays in use.
+    // A tile that left the dock but whose window still exists was restored
+    // (by swipe, click or Enter): the dock is done, hand the keyboard back.
+    // A closed window just disappears and the dock stays in use.
     for (var gone in seen) if (alive[gone] && !root.isMinimized(list, gone)) restored = true
     for (var i = 0; i < list.length; i++) {
       var c = list[i]
@@ -136,12 +146,11 @@ Item {
         title: String(c.title || c["class"] || "Window"),
         appClass: String(c["class"] || ""),
         icon: root.iconFor(c),
-        thumb: root.thumbnails ? ("file://" + root.thumbDir + "/" + address.replace(/[^0-9a-zA-Z]/g, "") + ".jpg") : "",
+        thumb: "file://" + root.thumbDir + "/" + address.replace(/[^0-9a-zA-Z]/g, "") + ".jpg",
         order: seen[address]
       })
     }
     next.sort(function(a, b) { return a.order - b.order })
-    // Forget addresses that are no longer minimized.
     var kept = ({})
     for (var k = 0; k < next.length; k++) kept[next[k].address] = seen[next[k].address]
     root.firstSeen = kept
@@ -154,20 +163,10 @@ Item {
     var index = -1
     for (var j = 0; j < next.length; j++) if (next[j].address === wanted) index = j
     root.setSelected(index >= 0 ? index : next.length - 1)
+    if (root.previewIndex >= next.length) root.previewIndex = -1
     if (next.length === 0 || restored) root.focusMode = false
     else if (newest) root.focusMode = true
   }
-
-  function isMinimized(list, address) {
-    for (var i = 0; i < list.length; i++) {
-      var c = list[i]
-      if (c && String(c.address) === address)
-        return !!c.workspace && c.workspace.name === root.minimizedWorkspace
-    }
-    return false
-  }
-
-
 
   function setSelected(index) {
     if (index < 0 || index >= root.windows.length) index = -1
@@ -183,16 +182,14 @@ Item {
   }
 
   function refresh() {
-    if (clientsProc.running) {
-      root.refreshPending = true
-      return
-    }
+    if (clientsProc.running) { root.refreshPending = true; return }
     clientsProc.running = true
   }
 
   function restore(address) {
     if (!address) return
     root.focusMode = false
+    root.previewIndex = -1
     // hyprctl dispatch wants a dispatcher back, so wrap the call.
     Quickshell.execDetached(["hyprctl", "dispatch",
       "(function() Minimize.restore('" + address + "'); return hl.dsp.no_op() end)()"])
@@ -200,6 +197,7 @@ Item {
 
   function closeWindow(address) {
     if (!address) return
+    root.previewIndex = -1
     // Resolve the window first: a close with no target would hit the focused
     // window if this tile's window vanished a moment ago.
     Quickshell.execDetached(["hyprctl", "dispatch",
@@ -207,38 +205,21 @@ Item {
       + "if w then hl.dispatch(hl.dsp.window.close({ window = w })) end; return hl.dsp.no_op() end)()"])
   }
 
-  property var tileItems: ({})
-  property int rowWidth: 0
-  property int panelWidth: 0
-  function hitTestClose(index) {
-    var tile = root.tileItems[index]
-    if (!tile) return "no tile"
-    var btn = tile.closeButtonItem
-    var pt = btn.mapToItem(tile, btn.width / 2, btn.height / 2)
-    // Walk down from the tile to the deepest child under that point.
-    var item = tile
-    while (true) {
-      var next = item.childAt(pt.x, pt.y)
-      if (!next) break
-      pt = item.mapToItem(next, pt.x, pt.y)
-      item = next
-    }
-    return item === tile.closeMouseItem ? "close" : (item === tile.tileMouseItem ? "tile" : String(item))
-  }
-
   function toggleFocus() {
-    if (root.windows.length === 0) {
-      root.focusMode = false
-      return
-    }
+    if (root.windows.length === 0) { root.focusMode = false; return }
     root.focusMode = !root.focusMode
   }
 
-  FileView {
-    id: selectedFile
-    path: root.selectedPath
-    printErrors: false
+  // Hover preview: a short delay so sweeping across the dock does not flash.
+  function hoverTile(index) {
+    root.hoverIndex = index
+    if (index < 0) { previewTimer.stop(); previewHide.restart() }
+    else { previewHide.stop(); if (root.previewIndex >= 0) root.previewIndex = index; else previewTimer.restart() }
   }
+  Timer { id: previewTimer; interval: 220; onTriggered: if (root.hoverIndex >= 0 && root.thumbnails) root.previewIndex = root.hoverIndex }
+  Timer { id: previewHide; interval: 120; onTriggered: if (root.hoverIndex < 0) root.previewIndex = -1 }
+
+  FileView { id: selectedFile; path: root.selectedPath; printErrors: false }
 
   FileView {
     id: settingsFile
@@ -252,25 +233,11 @@ Item {
   Process {
     id: clientsProc
     command: ["hyprctl", "clients", "-j"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.parseClients(text)
-    }
-    onRunningChanged: {
-      if (!running && root.refreshPending) {
-        root.refreshPending = false
-        root.refresh()
-      }
-    }
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.parseClients(text) }
+    onRunningChanged: if (!running && root.refreshPending) { root.refreshPending = false; root.refresh() }
   }
 
-  // Hyprland fires a burst of events per move; coalesce them into one refresh.
-  Timer {
-    id: refreshTimer
-    interval: 80
-    repeat: false
-    onTriggered: root.refresh()
-  }
+  Timer { id: refreshTimer; interval: 80; repeat: false; onTriggered: root.refresh() }
 
   Connections {
     target: Hyprland
@@ -279,240 +246,307 @@ Item {
       var name = String(event.name)
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
-          || name === "configreloaded") {
-        refreshTimer.restart()
-      }
+          || name === "configreloaded") refreshTimer.restart()
     }
   }
 
   Component.onCompleted: refresh()
 
-  // One tray per screen; only the tray on the focused screen takes the keyboard.
+  // Sizes shared by the dock and the preview.
+  readonly property int edge: Style.space(20)      // clearance to the screen sides
+  readonly property int pad: Style.space(10)       // card padding
+  readonly property int gap: Style.space(8)        // between tiles
+  readonly property int maxTileWidth: Style.space(156)
+  readonly property int bottomMargin: Style.space(10)
+
+  property var dockGeometry: ({ x: 0, width: 0, height: 0 })
+
+  // One dock per screen; only the one on the focused screen takes the keyboard.
   Variants {
     model: Quickshell.screens
 
     PanelWindow {
-      id: panel
+      id: dock
       required property var modelData
       screen: modelData
       readonly property bool onFocusedScreen: {
         var focused = Hyprland.focusedMonitor
-        if (!focused || !focused.name || !panel.screen || !panel.screen.name) return true
-        return focused.name === panel.screen.name
+        if (!focused || !focused.name || !dock.screen || !dock.screen.name) return true
+        return focused.name === dock.screen.name
+      }
+      readonly property int tileWidth: {
+        var n = Math.max(1, root.windows.length)
+        var avail = (dock.screen ? dock.screen.width : 1280) - 2 * root.edge - 2 * root.pad - (n - 1) * root.gap
+        return Math.max(Style.space(72), Math.min(root.maxTileWidth, Math.floor(avail / n)))
       }
       visible: root.windows.length > 0
-      anchors { bottom: true; left: true; right: true }
-      implicitHeight: root.trayHeight
+      anchors { bottom: true }
+      margins { bottom: root.bottomMargin }
+      implicitWidth: card.width
+      implicitHeight: card.height
       color: "transparent"
       exclusionMode: root.reserveSpace ? ExclusionMode.Auto : ExclusionMode.Ignore
       WlrLayershell.namespace: "omarchy-minimized-tray"
       WlrLayershell.layer: WlrLayer.Top
-      WlrLayershell.keyboardFocus: (root.focusMode && panel.onFocusedScreen) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+      WlrLayershell.keyboardFocus: (root.focusMode && dock.onFocusedScreen) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
       Connections {
         target: root
-        function onFocusModeChanged() { if (root.focusMode && panel.onFocusedScreen) keyCatcher.forceActiveFocus() }
+        function onFocusModeChanged() { if (root.focusMode && dock.onFocusedScreen) keyCatcher.forceActiveFocus() }
       }
 
-      // Tiles share the panel width: each one is capped so all of them fit,
-      // and the title inside elides to whatever is left.
-      readonly property int tileMaxWidth: {
-        var n = Math.max(1, root.windows.length)
-        return Math.floor((panel.width - Style.space(32) - (n - 1) * Style.space(6)) / n)
-      }
+      onWidthChanged: if (dock.onFocusedScreen) root.dockGeometry = { x: Math.round(((dock.screen ? dock.screen.width : 1280) - width) / 2), width: width, height: height }
+      onHeightChanged: if (dock.onFocusedScreen) root.dockGeometry = { x: Math.round(((dock.screen ? dock.screen.width : 1280) - width) / 2), width: width, height: height }
 
-    Rectangle {
-      anchors.fill: parent
-      color: Color.bar.background
-
-      // Hairline along the top edge so the tray reads as a shelf. Brighter
-      // while the tray has the keyboard.
       Rectangle {
-        anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: 1
-        color: root.focusMode ? Util.alpha(Color.accent, 0.6) : Util.alpha(Color.bar.text, 0.15)
-        Behavior on color { ColorAnimation { duration: 120 } }
-      }
+        id: card
+        width: tilesRow.width + 2 * root.pad
+        height: tilesRow.height + 2 * root.pad
+        radius: Math.max(Style.cornerRadius, Style.space(14))
+        color: Util.alpha(Color.popups.background, 0.9)
+        border.width: 1
+        border.color: root.focusMode ? Util.alpha(Color.accent, 0.55) : Util.alpha(Color.popups.border, 0.35)
+        Behavior on border.color { ColorAnimation { duration: 140 } }
 
-      Item {
-        id: keyCatcher
-        anchors.fill: parent
-        focus: true
-        Keys.onPressed: function(event) {
-          if (!root.focusMode) return
-          switch (event.key) {
-          case Qt.Key_Left:
-          case Qt.Key_Backtab:
-            root.moveSelection(-1); event.accepted = true; break
-          case Qt.Key_Right:
-          case Qt.Key_Tab:
-            root.moveSelection(1); event.accepted = true; break
-          case Qt.Key_Home:
-            root.setSelected(0); event.accepted = true; break
-          case Qt.Key_End:
-            root.setSelected(root.windows.length - 1); event.accepted = true; break
-          case Qt.Key_Return:
-          case Qt.Key_Enter:
-          case Qt.Key_Space:
-          case Qt.Key_Up:
-            root.restore(root.selectedAddress); event.accepted = true; break
-          case Qt.Key_Delete:
-          case Qt.Key_Backspace:
-            root.closeWindow(root.selectedAddress); event.accepted = true; break
-          case Qt.Key_Escape:
-          case Qt.Key_Down:
-            root.focusMode = false; event.accepted = true; break
+        Item {
+          id: keyCatcher
+          anchors.fill: parent
+          focus: true
+          Keys.onPressed: function(event) {
+            if (!root.focusMode) return
+            switch (event.key) {
+            case Qt.Key_Left: case Qt.Key_Backtab: root.moveSelection(-1); event.accepted = true; break
+            case Qt.Key_Right: case Qt.Key_Tab: root.moveSelection(1); event.accepted = true; break
+            case Qt.Key_Home: root.setSelected(0); event.accepted = true; break
+            case Qt.Key_End: root.setSelected(root.windows.length - 1); event.accepted = true; break
+            case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Space: case Qt.Key_Up:
+              root.restore(root.selectedAddress); event.accepted = true; break
+            case Qt.Key_Delete: case Qt.Key_Backspace:
+              root.closeWindow(root.selectedAddress); event.accepted = true; break
+            case Qt.Key_Escape: case Qt.Key_Down: root.focusMode = false; event.accepted = true; break
+            }
           }
         }
-      }
 
-      Row {
-        id: tilesRow
-        anchors.centerIn: parent
-        spacing: Style.space(6)
-        onWidthChanged: { root.rowWidth = width; root.panelWidth = panel.width }
+        Row {
+          id: tilesRow
+          anchors.centerIn: parent
+          spacing: root.gap
 
-        Repeater {
-          model: root.windows
+          Repeater {
+            model: root.windows
 
-          delegate: Rectangle {
-            id: entry
-            required property var modelData
-            required property int index
+            delegate: Item {
+              id: tile
+              required property var modelData
+              required property int index
+              readonly property bool selected: index === root.selectedIndex
+              readonly property bool hovered: index === root.hoverIndex
+              readonly property bool showThumb: root.thumbnails
+              readonly property int thumbHeight: Math.round(dock.tileWidth * 9 / 16)
+              width: dock.tileWidth
+              height: (showThumb ? thumbHeight + Style.space(8) : 0) + labelRow.height + Style.space(6) + dot.height
 
-            readonly property bool selected: index === root.selectedIndex
-            readonly property var closeButtonItem: closeButton
-            readonly property var closeMouseItem: closeMouse
-            readonly property var tileMouseItem: mouse
-            Component.onCompleted: { var t = root.tileItems; t[index] = entry; root.tileItems = t }
-            readonly property bool hovered: mouse.containsMouse || closeMouse.containsMouse
-            readonly property bool lit: selected || hovered
-            width: Math.max(minWidth, Math.min(naturalWidth, panel.tileMaxWidth))
-            height: root.trayHeight - Style.space(10)
-            radius: Style.cornerRadius
-            color: entry.selected
-              ? Style.selectedFillFor(Color.bar.text, Color.accent, Color.urgent)
-              : (entry.hovered
-                ? Style.hoverFillFor(Color.bar.text, Color.accent, Color.urgent)
-                : Style.normalFillFor(Color.bar.text, Color.accent, Color.urgent))
-            border.width: 1
-            border.color: entry.lit
-              ? Util.alpha(Color.accent, entry.selected ? Style.selectedBorderAlpha : Style.hoverBorderAlpha)
-              : Util.alpha(Color.bar.text, Style.normalBorderAlpha * 0.5)
-
-            Behavior on color { ColorAnimation { duration: 120 } }
-            Behavior on border.color { ColorAnimation { duration: 120 } }
-
-            // Declared before the icon/title/✕ so the ✕ button's own handler sits on top of it.
-            MouseArea {
-              id: mouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-              onEntered: root.setSelected(entry.index)
-              onClicked: function(event) {
-                if (event.button === Qt.MiddleButton) root.closeWindow(entry.modelData.address)
-                else root.restore(entry.modelData.address)
-              }
-            }
-
-            readonly property int pad: Style.space(10)
-            readonly property int gap: Style.space(8)
-            readonly property bool hasThumb: thumb.visible
-            readonly property int thumbSlot: hasThumb ? thumb.width + gap : 0
-            readonly property int naturalWidth: pad + thumbSlot + icon.width + gap + Math.ceil(title.implicitWidth) + gap + closeButton.width + pad
-            // Smallest useful tile: (thumbnail,) icon and ✕ with no title.
-            readonly property int minWidth: pad + thumbSlot + icon.width + gap + closeButton.width + pad
-
-            // Picture of the window, taken as it was minimized. Hidden when
-            // thumbnails are off or the capture is missing.
-            Image {
-              id: thumb
-              anchors { left: parent.left; leftMargin: entry.pad; verticalCenter: parent.verticalCenter }
-              readonly property int boxHeight: entry.height - Style.space(8)
-              height: boxHeight
-              width: status === Image.Ready && implicitHeight > 0
-                ? Math.max(Style.space(24), Math.min(Math.round(boxHeight * 16 / 9), Math.round(boxHeight * implicitWidth / implicitHeight)))
-                : 0
-              visible: root.thumbnails && entry.modelData.thumb !== "" && status === Image.Ready
-              source: entry.modelData.thumb
-              cache: false
-              asynchronous: true
-              fillMode: Image.PreserveAspectCrop
-              smooth: true
-              layer.enabled: visible && Style.cornerRadius > 0
-            }
-
-            Image {
-              id: icon
-              anchors { left: entry.hasThumb ? thumb.right : parent.left; leftMargin: entry.hasThumb ? entry.gap : entry.pad; verticalCenter: parent.verticalCenter }
-              width: Style.space(20)
-              height: width
-              source: entry.modelData.icon
-              sourceSize: Qt.size(width, height)
-              fillMode: Image.PreserveAspectFit
-              smooth: true
-            }
-
-            Text {
-              id: title
-              anchors { left: icon.right; leftMargin: entry.gap; right: closeButton.left; rightMargin: entry.gap; verticalCenter: parent.verticalCenter }
-              text: entry.modelData.title
-              color: entry.lit ? Color.accent : Color.bar.text
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              elide: Text.ElideRight
-              textFormat: Text.PlainText
-              visible: width >= Style.space(14)
-            }
-
-            // Close button: a small ✕ after the title.
-            Rectangle {
-              id: closeButton
-              z: 1
-              anchors { right: parent.right; rightMargin: entry.pad; verticalCenter: parent.verticalCenter }
-              width: Style.space(18)
-              height: width
-              radius: width / 2
-              readonly property bool hovered: closeMouse.containsMouse
-              color: hovered ? Util.alpha(Color.urgent, 0.35) : "transparent"
-              Behavior on color { ColorAnimation { duration: 100 } }
-
-              Text {
-                anchors.centerIn: parent
-                text: "\u2715"
-                color: closeButton.hovered ? Color.foreground : Util.alpha(Color.bar.text, entry.lit ? 0.8 : 0.45)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                textFormat: Text.PlainText
-              }
-
+              // Whole-tile handler, declared first so the ✕ sits above it.
               MouseArea {
-                id: closeMouse
+                id: mouse
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.closeWindow(entry.modelData.address)
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                onEntered: { root.setSelected(tile.index); root.hoverTile(tile.index) }
+                onExited: if (root.hoverIndex === tile.index) root.hoverTile(-1)
+                onClicked: function(event) {
+                  if (event.button === Qt.MiddleButton) root.closeWindow(tile.modelData.address)
+                  else root.restore(tile.modelData.address)
+                }
+              }
+
+              // Thumbnail card with the accent frame when selected.
+              Rectangle {
+                id: frame
+                visible: tile.showThumb
+                width: tile.width
+                height: tile.thumbHeight
+                radius: Style.space(8)
+                color: Util.alpha(Color.bar.text, 0.06)
+                border.width: tile.selected ? 2 : 1
+                border.color: tile.selected ? Color.accent : Util.alpha(Color.bar.text, tile.hovered ? 0.35 : 0.14)
+                Behavior on border.color { ColorAnimation { duration: 120 } }
+
+                // Soft glow behind the selected frame.
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(3)
+                  radius: parent.radius + Style.space(3)
+                  color: "transparent"
+                  border.width: Style.space(3)
+                  border.color: Util.alpha(Color.accent, tile.selected ? 0.22 : 0)
+                  z: -1
+                  Behavior on border.color { ColorAnimation { duration: 160 } }
+                }
+
+                Image {
+                  id: thumb
+                  anchors.fill: parent
+                  anchors.margins: 2
+                  source: tile.modelData.thumb
+                  cache: false
+                  asynchronous: true
+                  fillMode: Image.PreserveAspectCrop
+                  smooth: true
+                  clip: true
+                  visible: status === Image.Ready
+                }
+                // Fallback when the capture is missing: a big icon on the card.
+                Image {
+                  anchors.centerIn: parent
+                  width: Style.space(32); height: width
+                  source: tile.modelData.icon
+                  sourceSize: Qt.size(width, height)
+                  visible: thumb.status !== Image.Ready
+                  opacity: 0.8
+                }
+
+                // Close button, top right, on hover or when keyboard-selected.
+                Rectangle {
+                  id: closeButton
+                  z: 2
+                  anchors { top: parent.top; right: parent.right; margins: Style.space(5) }
+                  width: Style.space(20); height: width; radius: width / 2
+                  readonly property bool hot: closeMouse.containsMouse
+                  visible: tile.hovered || (tile.selected && root.focusMode)
+                  color: hot ? Util.alpha(Color.urgent, 0.85) : Util.alpha(Color.popups.background, 0.85)
+                  border.width: 1
+                  border.color: Util.alpha(Color.foreground, hot ? 0.6 : 0.3)
+                  Text { anchors.centerIn: parent; text: "✕"; color: Color.foreground; font.family: Style.font.family; font.pixelSize: Style.font.caption; textFormat: Text.PlainText }
+                  MouseArea {
+                    id: closeMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: root.hoverTile(tile.index)
+                    onClicked: root.closeWindow(tile.modelData.address)
+                  }
+                }
+              }
+
+              // Icon + title under the picture.
+              Item {
+                id: labelRow
+                anchors { left: parent.left; right: parent.right; top: tile.showThumb ? frame.bottom : parent.top; topMargin: tile.showThumb ? Style.space(8) : 0 }
+                height: Math.max(icon.height, title.implicitHeight)
+                Image {
+                  id: icon
+                  anchors { left: parent.left; leftMargin: Style.space(4); verticalCenter: parent.verticalCenter }
+                  width: Style.space(18); height: width
+                  source: tile.modelData.icon
+                  sourceSize: Qt.size(width, height)
+                  fillMode: Image.PreserveAspectFit
+                  smooth: true
+                }
+                Text {
+                  id: title
+                  anchors { left: icon.right; leftMargin: Style.space(6); right: parent.right; rightMargin: Style.space(2); verticalCenter: parent.verticalCenter }
+                  text: tile.modelData.title
+                  color: tile.selected ? Color.foreground : Util.alpha(Color.bar.text, 0.85)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                  textFormat: Text.PlainText
+                }
+              }
+
+              // Indicator dot.
+              Rectangle {
+                id: dot
+                anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom }
+                width: Style.space(5); height: width; radius: width / 2
+                color: tile.selected ? Color.accent : Util.alpha(Color.bar.text, 0.3)
+                Behavior on color { ColorAnimation { duration: 120 } }
               }
             }
           }
         }
       }
-
-      // Key hints while the tray has the keyboard (hidden when the tiles need the room).
-      Text {
-        id: hint
-        anchors { right: parent.right; rightMargin: Style.space(12); verticalCenter: parent.verticalCenter }
-        visible: root.focusMode && (tilesRow.width / 2 + hint.implicitWidth + Style.space(24) < panel.width / 2)
-        text: "←  →  select   ↵ restore   ⌫ close   esc / ↓ / super+m  release keys"
-        color: Util.alpha(Color.bar.text, 0.55)
-        font.family: Style.font.family
-        font.pixelSize: Style.font.bodySmall
-        textFormat: Text.PlainText
-      }
     }
   }
+
+  // Larger preview above the hovered tile: the full title and a bigger picture.
+  PanelWindow {
+    id: preview
+    readonly property var entry: (root.previewIndex >= 0 && root.previewIndex < root.windows.length) ? root.windows[root.previewIndex] : null
+    readonly property int tileW: root.dockGeometry.width > 0 && root.windows.length > 0
+      ? Math.floor((root.dockGeometry.width - 2 * root.pad - (root.windows.length - 1) * root.gap) / root.windows.length) : 0
+    readonly property int tileCentre: root.dockGeometry.x + root.pad + root.previewIndex * (tileW + root.gap) + tileW / 2
+    readonly property int screenW: screen ? screen.width : 1280
+    visible: entry !== null && root.thumbnails
+    anchors { bottom: true; left: true }
+    margins {
+      bottom: root.bottomMargin + root.dockGeometry.height + Style.space(10)
+      left: Math.max(root.edge, Math.min(screenW - root.edge - previewCard.width, tileCentre - previewCard.width / 2))
+    }
+    implicitWidth: previewCard.width
+    implicitHeight: previewCard.height
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-minimized-preview"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    mask: Region {}
+
+    Rectangle {
+      id: previewCard
+      readonly property int imgW: Style.space(300)
+      width: imgW + 2 * root.pad
+      height: previewTitle.height + Style.space(8) + previewImage.height + 2 * root.pad
+      radius: Style.space(12)
+      color: Util.alpha(Color.popups.background, 0.94)
+      border.width: 1
+      border.color: Util.alpha(Color.popups.border, 0.5)
+
+      Row {
+        id: previewTitle
+        anchors { top: parent.top; left: parent.left; right: parent.right; margins: root.pad }
+        height: Style.space(20)
+        spacing: Style.space(8)
+        Image {
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(18); height: width
+          source: preview.entry ? preview.entry.icon : ""
+          sourceSize: Qt.size(width, height)
+        }
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          width: previewTitle.width - Style.space(26)
+          text: preview.entry ? preview.entry.title : ""
+          color: Color.foreground
+          font.family: Style.font.family
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+          textFormat: Text.PlainText
+        }
+      }
+      Rectangle {
+        anchors { top: previewTitle.bottom; topMargin: Style.space(8); left: parent.left; leftMargin: root.pad }
+        width: previewCard.imgW
+        height: previewImage.height
+        radius: Style.space(8)
+        color: Util.alpha(Color.bar.text, 0.06)
+        border.width: 1
+        border.color: Util.alpha(Color.bar.text, 0.15)
+        Image {
+          id: previewImage
+          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 2 }
+          height: status === Image.Ready && implicitWidth > 0 ? Math.round((width) * implicitHeight / implicitWidth) : Math.round(width * 9 / 16)
+          source: preview.entry ? preview.entry.thumb : ""
+          cache: false
+          asynchronous: true
+          fillMode: Image.PreserveAspectFit
+          smooth: true
+        }
+      }
+    }
   }
 
   IpcHandler {
@@ -525,9 +559,8 @@ Item {
     function selected(): string { return root.selectedAddress }
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
-    // Debug: tiles row width vs panel width on the first screen.
-    function layout(): string { return String(root.rowWidth) + "/" + String(root.panelWidth) }
-    // Debug: what receives a click at the centre of tile <index>'s ✕ ("close" or "tile").
-    function hitTestClose(index: int): string { return root.hitTestClose(index) }
+    function layout(): string { return String(root.dockGeometry.width) + "x" + String(root.dockGeometry.height) + " at x=" + String(root.dockGeometry.x) }
+    // Debug: force the hover preview for tile <index> (-1 hides).
+    function preview(index: int): string { root.hoverIndex = index; root.previewIndex = index; return "ok" }
   }
 }
