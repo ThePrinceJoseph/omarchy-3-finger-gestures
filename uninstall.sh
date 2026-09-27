@@ -10,7 +10,7 @@ id="threefinger.minimized-tray"
 # Rescue minimized windows before the tray goes away: a full restore (size,
 # tiling, maximize) while minimize.lua is still loaded, else a plain move back.
 hyprctl dispatch "(function()
-  if Minimize and Minimize.restore_all then Minimize.restore_all() return hl.dsp.no_op() end
+  if Minimize and Minimize.shutdown then Minimize.shutdown() return hl.dsp.no_op() end
   for _, w in ipairs(hl.get_workspace_windows('special:minimized')) do
     hl.dispatch(hl.dsp.window.move({ window = w, workspace = '+0', follow = false }))
     hl.dispatch(hl.dsp.window.float({ window = w, action = 'disable' }))

@@ -19,7 +19,8 @@ return {
   instant_keyboard_switch = true,
 
   -- Keep workspaces 1..N alive even when empty, so a swipe visits each one in
-  -- order and stops at N instead of skipping empty ones. 0 disables.
+  -- order instead of skipping empty ones, and never creates new ones past N.
+  -- (A workspace above N that already has a window stays reachable.) 0 disables.
   persistent_workspaces = 5,
 
   -- The minimize gestures and their tray. false = workspace swipe only.
@@ -28,4 +29,7 @@ return {
   -- Key that hands the keyboard to the tray (Left/Right pick a tile, Enter
   -- restores, Escape lets go). false = no key.
   tray_key = "SUPER + M",
+
+  -- How many windows the tray holds before swipe down says "full". 0 = no limit.
+  tray_max = 5,
 }

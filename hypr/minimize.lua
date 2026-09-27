@@ -27,6 +27,9 @@ M.selected_path = os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-sel
 M.stack = M.stack or {}   -- addresses, newest last
 M.saved = M.saved or {}   -- address -> geometry/state to put back on restore
 M.busy = M.busy or {}     -- address -> true while a minimize/restore animation runs
+M.max_windows = M.max_windows or 5  -- tray capacity; 0 = unlimited (gestures.lua sets it from settings)
+M.pending = M.pending or 0          -- minimizes started but not yet landed in the tray
+M.shutting_down = false             -- set by M.shutdown(); refuses new minimizes
 
 local function vec(v)
   if type(v) ~= "table" then return 0, 0 end
@@ -37,15 +40,19 @@ local function find(addr)
   return hl.get_window("address:" .. addr)
 end
 
--- Logical (scaled) geometry of the active monitor.
-local function monitor()
-  local m = hl.get_active_monitor()
+-- Logical (scaled, rotated) geometry of a monitor: the given one, else the
+-- active one. Hyprland reports width/height in untransformed pixels, so a
+-- portrait monitor (odd transform) has them swapped.
+local function monitor(m)
+  m = m or hl.get_active_monitor()
   local scale = (m and m.scale and m.scale > 0) and m.scale or 1
+  local pw, ph = m and m.width or 1920, m and m.height or 1200
+  if m and m.transform and m.transform % 2 == 1 then pw, ph = ph, pw end
   return {
     x = m and m.x or 0,
     y = m and m.y or 0,
-    w = m and math.floor(m.width / scale) or 1280,
-    h = m and math.floor(m.height / scale) or 800,
+    w = math.floor(pw / scale),
+    h = math.floor(ph / scale),
   }
 end
 
@@ -141,10 +148,10 @@ end
 -- workspace, as a strip nobody can reach. On every load, put such windows
 -- straight back where they belong (no animation).
 local function recover_stranded()
-  local mon = monitor()
   for _, w in ipairs(hl.get_windows() or {}) do
     local s = state_from_tags(w)
-    if s and not (w.workspace and w.workspace.name == M.workspace) then
+    if s and not M.busy[w.address] and not (w.workspace and w.workspace.name == M.workspace) then
+      local mon = monitor(w.monitor)
       local sw = math.min(s.w or math.floor(mon.w * 0.6), mon.w)
       local sh = math.min(s.h or math.floor(mon.h * 0.6), mon.h)
       local ax = mon.x + math.max(0, math.min(s.x or 0, mon.w - sw))
@@ -156,13 +163,26 @@ local function recover_stranded()
   end
 end
 
+local function notify(title, body)
+  hl.exec_cmd(string.format("notify-send -a '3 Finger Gestures' -t 2500 %q %q", title, body))
+end
+
 function M.minimize(w)
+  if M.shutting_down then return false end
   w = w or hl.get_active_window()
   if not w then return false end
   if w.workspace and w.workspace.name == M.workspace then return false end
   local addr = w.address
   if M.busy[addr] then return false end -- already on its way
+  if M.max_windows and M.max_windows > 0 then
+    local stashed = #hl.get_workspace_windows(M.workspace) + M.pending
+    if stashed >= M.max_windows then
+      notify("Tray is full", "Bring a window back before minimizing another (" .. M.max_windows .. " max).")
+      return false
+    end
+  end
   M.busy[addr] = true
+  M.pending = M.pending + 1
 
   local ax, ay = vec(w.at)
   local sw, sh = vec(w.size)
@@ -195,14 +215,23 @@ function M.minimize(w)
   -- Next tick: shrink toward the bottom edge, then stash it once it lands.
   after(30, function()
     local w2 = find(addr)
-    if not w2 then forget(addr) return end
+    if not w2 or M.shutting_down then M.pending = math.max(0, M.pending - 1) forget(addr) return end
     local tx, ty, tw, th = tray_target(ax, sw, mon)
     -- resize first: Hyprland keeps the centre on resize, then move pins the spot
     hl.dispatch(hl.dsp.window.resize({ window = w2, x = tw, y = th }))
     hl.dispatch(hl.dsp.window.move({ window = w2, x = tx, y = ty }))
     after(M.anim_ms, function()
+      M.pending = math.max(0, M.pending - 1)
       local w3 = find(addr)
       if not w3 then forget(addr) return end
+      if M.shutting_down then
+        -- Uninstall started mid-animation: put it back instead of stashing it.
+        hl.dispatch(hl.dsp.window.resize({ window = w3, x = sw, y = sh }))
+        hl.dispatch(hl.dsp.window.move({ window = w3, x = ax, y = ay }))
+        apply_final_state(w3, M.saved[addr] or { floating = false })
+        forget(addr)
+        return
+      end
       hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
       table.insert(M.stack, addr)
       M.busy[addr] = nil
@@ -304,9 +333,19 @@ function M.restore_selected()
   return M.restore_latest()
 end
 
--- Restore everything in the tray at once (used by uninstall.sh).
+-- Restore everything in the tray at once.
 function M.restore_all()
   for _, w in ipairs(hl.get_workspace_windows(M.workspace)) do M.restore(w.address) end
+end
+
+-- Used by uninstall.sh: stop taking new windows, bring back everything in the
+-- tray, and put back anything caught mid-animation (its timers see the flag).
+-- Windows tagged but idle outside the tray (a reload interrupted them) are
+-- handled by recover_stranded's next pass, which shutdown runs right away.
+function M.shutdown()
+  M.shutting_down = true
+  M.restore_all()
+  recover_stranded()
 end
 
 -- Runs shortly after each config load, once windows are known.

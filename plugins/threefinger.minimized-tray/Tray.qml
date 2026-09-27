@@ -26,7 +26,6 @@ Item {
   readonly property string minimizedWorkspace: "special:minimized"
   // Keep in sync with M.tray_height in minimize.lua.
   readonly property int trayHeight: Style.space(40)
-  readonly property int maxTitleWidth: Style.space(200)
   // Keep in sync with M.selected_path in minimize.lua.
   readonly property string selectedPath: Quickshell.env("HOME") + "/.local/state/omarchy/minimized-tray-selected"
 
@@ -185,11 +184,16 @@ Item {
 
   function closeWindow(address) {
     if (!address) return
+    // Resolve the window first: a close with no target would hit the focused
+    // window if this tile's window vanished a moment ago.
     Quickshell.execDetached(["hyprctl", "dispatch",
-      "hl.dsp.window.close({ window = hl.get_window('address:" + address + "') })"])
+      "(function() local w = hl.get_window('address:" + address + "'); "
+      + "if w then hl.dispatch(hl.dsp.window.close({ window = w })) end; return hl.dsp.no_op() end)()"])
   }
 
   property var tileItems: ({})
+  property int rowWidth: 0
+  property int panelWidth: 0
   function hitTestClose(index) {
     var tile = root.tileItems[index]
     if (!tile) return "no tile"
@@ -285,6 +289,13 @@ Item {
         function onFocusModeChanged() { if (root.focusMode && panel.onFocusedScreen) keyCatcher.forceActiveFocus() }
       }
 
+      // Tiles share the panel width: each one is capped so all of them fit,
+      // and the title inside elides to whatever is left.
+      readonly property int tileMaxWidth: {
+        var n = Math.max(1, root.windows.length)
+        return Math.floor((panel.width - Style.space(32) - (n - 1) * Style.space(6)) / n)
+      }
+
     Rectangle {
       anchors.fill: parent
       color: Color.bar.background
@@ -331,8 +342,10 @@ Item {
       }
 
       Row {
+        id: tilesRow
         anchors.centerIn: parent
         spacing: Style.space(6)
+        onWidthChanged: { root.rowWidth = width; root.panelWidth = panel.width }
 
         Repeater {
           model: root.windows
@@ -349,7 +362,7 @@ Item {
             Component.onCompleted: { var t = root.tileItems; t[index] = entry; root.tileItems = t }
             readonly property bool hovered: mouse.containsMouse || closeMouse.containsMouse
             readonly property bool lit: selected || hovered
-            width: content.implicitWidth + Style.space(20)
+            width: Math.max(Style.space(96), Math.min(naturalWidth, panel.tileMaxWidth))
             height: root.trayHeight - Style.space(10)
             radius: Style.cornerRadius
             color: entry.selected
@@ -365,7 +378,7 @@ Item {
             Behavior on color { ColorAnimation { duration: 120 } }
             Behavior on border.color { ColorAnimation { duration: 120 } }
 
-            // Declared before the content so the ✕ button's own handler sits on top of it.
+            // Declared before the icon/title/✕ so the ✕ button's own handler sits on top of it.
             MouseArea {
               id: mouse
               anchors.fill: parent
@@ -377,73 +390,72 @@ Item {
                 if (event.button === Qt.MiddleButton) root.closeWindow(entry.modelData.address)
                 else root.restore(entry.modelData.address)
               }
+            }
 
-            Row {
-              id: content
-              anchors.centerIn: parent
-              spacing: Style.space(8)
+            readonly property int pad: Style.space(10)
+            readonly property int gap: Style.space(8)
+            readonly property int naturalWidth: pad + icon.width + gap + Math.ceil(title.implicitWidth) + gap + closeButton.width + pad
 
-              Image {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(20)
-                height: width
-                source: entry.modelData.icon
-                sourceSize: Qt.size(width, height)
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-              }
+            Image {
+              id: icon
+              anchors { left: parent.left; leftMargin: entry.pad; verticalCenter: parent.verticalCenter }
+              width: Style.space(20)
+              height: width
+              source: entry.modelData.icon
+              sourceSize: Qt.size(width, height)
+              fillMode: Image.PreserveAspectFit
+              smooth: true
+            }
+
+            Text {
+              id: title
+              anchors { left: icon.right; leftMargin: entry.gap; right: closeButton.left; rightMargin: entry.gap; verticalCenter: parent.verticalCenter }
+              text: entry.modelData.title
+              color: entry.lit ? Color.accent : Color.bar.text
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              elide: Text.ElideRight
+              textFormat: Text.PlainText
+            }
+
+            // Close button: a small ✕ after the title.
+            Rectangle {
+              id: closeButton
+              z: 1
+              anchors { right: parent.right; rightMargin: entry.pad; verticalCenter: parent.verticalCenter }
+              width: Style.space(18)
+              height: width
+              radius: width / 2
+              readonly property bool hovered: closeMouse.containsMouse
+              color: hovered ? Util.alpha(Color.urgent, 0.35) : "transparent"
+              Behavior on color { ColorAnimation { duration: 100 } }
 
               Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: entry.modelData.title
-                color: entry.lit ? Color.accent : Color.bar.text
+                anchors.centerIn: parent
+                text: "\u2715"
+                color: closeButton.hovered ? Color.foreground : Util.alpha(Color.bar.text, entry.lit ? 0.8 : 0.45)
                 font.family: Style.font.family
-                font.pixelSize: Style.font.body
-                elide: Text.ElideRight
-                width: Math.min(implicitWidth, root.maxTitleWidth)
+                font.pixelSize: Style.font.bodySmall
                 textFormat: Text.PlainText
               }
 
-              // Close button: a small ✕ after the title.
-              Rectangle {
-                id: closeButton
-                z: 1
-                anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(18)
-                height: width
-                radius: width / 2
-                readonly property bool hovered: closeMouse.containsMouse
-                color: hovered ? Util.alpha(Color.urgent, 0.35) : "transparent"
-                Behavior on color { ColorAnimation { duration: 100 } }
-
-                Text {
-                  anchors.centerIn: parent
-                  text: "✕"
-                  color: closeButton.hovered ? Color.foreground : Util.alpha(Color.bar.text, entry.lit ? 0.8 : 0.45)
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.bodySmall
-                  textFormat: Text.PlainText
-                }
-
-                MouseArea {
-                  id: closeMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.closeWindow(entry.modelData.address)
-                }
+              MouseArea {
+                id: closeMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.closeWindow(entry.modelData.address)
               }
-            }
-
             }
           }
         }
       }
 
-      // Key hints while the tray has the keyboard.
+      // Key hints while the tray has the keyboard (hidden when the tiles need the room).
       Text {
+        id: hint
         anchors { right: parent.right; rightMargin: Style.space(12); verticalCenter: parent.verticalCenter }
-        visible: root.focusMode
+        visible: root.focusMode && (tilesRow.width / 2 + hint.implicitWidth + Style.space(24) < panel.width / 2)
         text: "←  →  select   ↵ restore   ⌫ close   esc / ↓ / super+m  release keys"
         color: Util.alpha(Color.bar.text, 0.55)
         font.family: Style.font.family
@@ -464,6 +476,8 @@ Item {
     function selected(): string { return root.selectedAddress }
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
+    // Debug: tiles row width vs panel width on the first screen.
+    function layout(): string { return String(root.rowWidth) + "/" + String(root.panelWidth) }
     // Debug: what receives a click at the centre of tile <index>'s ✕ ("close" or "tile").
     function hitTestClose(index: int): string { return root.hitTestClose(index) }
   }

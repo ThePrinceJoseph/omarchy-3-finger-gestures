@@ -52,9 +52,10 @@ reloads by itself. Delete a line to go back to that setting's default.
 | `swipe_min_speed_to_force` | `25` | A flick faster than this commits regardless of distance. |
 | `slide_speed` | `4.5` | Glide speed after you let go. Lower = slower. `false` leaves Omarchy's animations alone. |
 | `instant_keyboard_switch` | `true` | Keep SUPER+1..0 instant even though swiping glides. |
-| `persistent_workspaces` | `5` | Keep workspaces 1..N alive so a swipe visits each one and stops at N. `0` to disable. |
+| `persistent_workspaces` | `5` | Keep workspaces 1..N alive so a swipe visits each one in order and never creates new ones past N. A workspace above N that already has a window stays reachable. `0` to disable. |
 | `minimize` | `true` | The down/up gestures and the tray. `false` for the workspace swipe only. |
 | `tray_key` | `"SUPER + M"` | Key that toggles the tray's keyboard. `false` for none. |
+| `tray_max` | `5` | How many windows the tray holds. Swipe down on a full tray shows a notification. `0` for no limit (tiles shrink to fit). |
 
 Two more knobs sit at the top of `minimize.lua`: `anim_ms` (how long the shrink and
 grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.qml`).
@@ -65,6 +66,9 @@ grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.
   the tray until you press Escape. If you would rather it never grabbed the keyboard,
   remove the `else if (newest) root.focusMode = true` line in `Tray.qml` and use
   SUPER+M when you want it.
+- **Why the tray holds 5.** Tiles share the screen width and titles shrink to fit. On a
+  1280-wide screen five tiles keep about 22 characters of title, six about 15, eight
+  about 10. Raise `tray_max` if you have a wider screen, or set it to `0` for no limit.
 - **The tray reserves space** like the bar, so tiled windows re-tile when it appears
   and disappears. To float it over the bottom edge instead, set `exclusionMode:
   ExclusionMode.Ignore` in `Tray.qml`.
