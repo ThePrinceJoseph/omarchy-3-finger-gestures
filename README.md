@@ -111,7 +111,9 @@ tiling layout or re-maximized. If nothing is selected it takes the most recently
 minimized window.
 
 **The glue.** The minimize logic is a global Lua table (`Minimize`) inside Hyprland's
-own Lua runtime. The gestures call it directly, and the tray calls the same functions
+own Lua runtime. Hyprland forgets that state on every config reload, so each window's
+original size and tiled/maximized state is also written onto the window as a tag
+(`min_...`), which survives reloads. The gestures call it directly, and the tray calls the same functions
 from outside through `hyprctl dispatch`, so there is one implementation and two ways in.
 
 ## License

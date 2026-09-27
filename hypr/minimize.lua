@@ -69,6 +69,51 @@ local function tray_target(ax, sw, mon)
   return tx, ty, tw, th
 end
 
+-- Hyprland throws its Lua state away on every config reload, so M.saved alone
+-- is not enough: a window minimized before a reload would come back at a
+-- default size and floating. The original state is therefore also written
+-- onto the window itself as a tag (tags live in Hyprland and survive reloads):
+--   min_<floating 0/1>_<fullscreen 0/1/2>_<x>_<y>_<w>_<h>   (negatives as n123)
+local function encode_num(n)
+  n = math.floor(n or 0)
+  return n < 0 and ("n" .. -n) or tostring(n)
+end
+
+local function decode_num(str)
+  if str:sub(1, 1) == "n" then return -tonumber(str:sub(2)) end
+  return tonumber(str)
+end
+
+local function state_tag(state)
+  return "min_" .. (state.floating and 1 or 0) .. "_" .. (state.maximized and 1 or (state.fullscreen and 2 or 0))
+    .. "_" .. encode_num(state.x) .. "_" .. encode_num(state.y)
+    .. "_" .. encode_num(state.w) .. "_" .. encode_num(state.h)
+end
+
+-- Returns the saved state stored on the window and the exact tag it came from.
+local function state_from_tags(w)
+  local tags = w and w.tags
+  if type(tags) ~= "table" then return nil, nil end
+  for _, raw in ipairs(tags) do
+    local tag = tostring(raw):gsub("%*$", "")
+    local fl, fs, x, y, ww, hh = tag:match("^min_(%d)_(%d)_(n?%d+)_(n?%d+)_(n?%d+)_(n?%d+)$")
+    if fl then
+      return {
+        floating = fl == "1",
+        maximized = fs == "1",
+        fullscreen = fs == "2",
+        x = decode_num(x), y = decode_num(y), w = decode_num(ww), h = decode_num(hh),
+      }, tag
+    end
+  end
+  return nil, nil
+end
+
+local function clear_state_tag(w)
+  local _, tag = state_from_tags(w)
+  if tag then hl.dispatch(hl.dsp.window.tag({ window = w, tag = "-" .. tag })) end
+end
+
 local function forget(addr)
   M.saved[addr] = nil
   M.busy[addr] = nil
@@ -88,12 +133,15 @@ function M.minimize(w)
   local ax, ay = vec(w.at)
   local sw, sh = vec(w.size)
   local mon = monitor()
-  M.saved[addr] = {
+  local state = {
     floating = w.floating,
     maximized = (w.fullscreen == 1),
     fullscreen = (w.fullscreen == 2),
     x = ax, y = ay, w = sw, h = sh,
   }
+  M.saved[addr] = state
+  clear_state_tag(w)
+  hl.dispatch(hl.dsp.window.tag({ window = w, tag = "+" .. state_tag(state) }))
 
   -- Let go of maximize/fullscreen and float the window in place, so it can be
   -- moved and resized freely.
@@ -133,11 +181,13 @@ function M.restore(addr)
   if not (w.workspace and w.workspace.name == M.workspace) then forget(addr) return false end
   if M.busy[addr] then return false end
   M.busy[addr] = true
-  local s = M.saved[addr] or {}
+  local tagged = state_from_tags(w)
+  -- Prefer what is stored on the window (survives reloads), then our table.
+  -- With neither, assume a tiled window of a sensible centred size.
+  local s = tagged or M.saved[addr] or { floating = false }
+  if s.floating == nil then s.floating = false end
   local mon = monitor()
   local target = current_workspace()
-  -- Geometry to grow back to. A window minimized before a config reload has
-  -- no saved geometry, so give it a sensible centred size.
   local sw = s.w or math.floor(mon.w * 0.6)
   local sh = s.h or math.floor(mon.h * 0.6)
   local ax = s.x or (mon.x + math.floor((mon.w - sw) / 2))
@@ -164,6 +214,7 @@ function M.restore(addr)
     after(M.anim_ms, function()
       local w3 = find(addr)
       if not w3 then forget(addr) return end
+      clear_state_tag(w3)
       if s.floating == false then
         hl.dispatch(hl.dsp.window.float({ window = w3, action = "disable" }))
       end
