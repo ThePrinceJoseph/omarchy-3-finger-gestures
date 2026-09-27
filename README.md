@@ -56,9 +56,11 @@ reloads by itself. Delete a line to go back to that setting's default.
 | `minimize` | `true` | The down/up gestures and the tray. `false` for the workspace swipe only. |
 | `tray_key` | `"SUPER + M"` | Key that toggles the tray's keyboard. `false` for none. |
 | `tray_max` | `5` | How many windows the tray holds, 1 to 12. Swipe down on a full tray shows a notification saying so. |
+| `tray_height` | `40` | Tray height in pixels. |
+| `tray_reserve_space` | `false` | `true` makes the tray reserve space like the bar, so tiled windows shrink to make room when it appears. `false` floats it over the bottom edge and nothing else moves. |
 
-Two more knobs sit at the top of `minimize.lua`: `anim_ms` (how long the shrink and
-grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.qml`).
+One more knob sits at the top of `minimize.lua`: `anim_ms`, how long the shrink and
+grow take (matched to Omarchy's window animation speed).
 
 ## Good to know
 
@@ -71,9 +73,8 @@ grow take) and `tray_height` (keep it equal to `trayHeight` in the tray's `Tray.
   titles shrink to fit: on a 1280-wide screen five tiles keep about 22 characters of
   title, eight about 10, and twelve are down to an icon and a couple of letters. Raise
   `tray_max` on a wider screen if you like; it is capped at 12.
-- **The tray reserves space** like the bar, so tiled windows re-tile when it appears
-  and disappears. To float it over the bottom edge instead, set `exclusionMode:
-  ExclusionMode.Ignore` in `Tray.qml`.
+- **The tray floats over the bottom edge** by default, so nothing re-tiles when it comes
+  and goes. Set `tray_reserve_space = true` if you would rather nothing ever sits under it.
 - **A sloppy diagonal swipe** can be read as the other axis. If down/up misfire or
   feel too eager, add `scale = 1.5` (or another value) to those two `hl.gesture`
   lines in `gestures.lua` (the installer backs that file up before replacing it).

@@ -24,8 +24,20 @@ Item {
   property var shell: null
 
   readonly property string minimizedWorkspace: "special:minimized"
-  // Keep in sync with M.tray_height in minimize.lua.
-  readonly property int trayHeight: Style.space(40)
+  // Height and reserve-space come from gestures.lua via a small state file.
+  property int trayHeight: Style.space(40)
+  property bool reserveSpace: false
+  readonly property string settingsPath: Quickshell.env("HOME") + "/.local/state/omarchy/minimized-tray-settings.json"
+
+  function applySettings(text) {
+    try {
+      var cfg = JSON.parse(text || "{}")
+      if (cfg.height > 0) root.trayHeight = Style.space(cfg.height)
+      root.reserveSpace = cfg.reserveSpace === true
+    } catch (e) {
+      root.log("could not parse " + root.settingsPath + ": " + e)
+    }
+  }
   // Keep in sync with M.selected_path in minimize.lua.
   readonly property string selectedPath: Quickshell.env("HOME") + "/.local/state/omarchy/minimized-tray-selected"
 
@@ -224,6 +236,15 @@ Item {
     printErrors: false
   }
 
+  FileView {
+    id: settingsFile
+    path: root.settingsPath
+    printErrors: false
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.applySettings(text())
+  }
+
   Process {
     id: clientsProc
     command: ["hyprctl", "clients", "-j"]
@@ -279,7 +300,7 @@ Item {
       anchors { bottom: true; left: true; right: true }
       implicitHeight: root.trayHeight
       color: "transparent"
-      exclusionMode: ExclusionMode.Auto
+      exclusionMode: root.reserveSpace ? ExclusionMode.Auto : ExclusionMode.Ignore
       WlrLayershell.namespace: "omarchy-minimized-tray"
       WlrLayershell.layer: WlrLayer.Top
       WlrLayershell.keyboardFocus: (root.focusMode && panel.onFocusedScreen) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None

@@ -21,7 +21,7 @@ local M = Minimize
 
 M.workspace = "special:minimized"
 M.anim_ms = 380       -- ms the shrink/grow takes (Omarchy's `windows` animation speed, 3.79)
-M.tray_height = 40    -- logical px; keep in sync with trayHeight in the tray plugin
+M.tray_height = 40    -- logical px; gestures.lua sets it from settings and tells the tray
 -- The tray writes the selected tile's address here; keep in sync with selectedPath there.
 M.selected_path = os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-selected"
 M.stack = M.stack or {}   -- addresses, newest last
@@ -210,8 +210,9 @@ function M.minimize(w)
   clear_state_tag(w)
   hl.dispatch(hl.dsp.window.tag({ window = w, tag = "+" .. state_tag(state) }))
 
-  -- Let go of maximize/fullscreen and float the window in place, so it can be
-  -- moved and resized freely.
+  -- Let go of maximize/fullscreen, float the window and, in the same breath,
+  -- aim it at the tray strip: Hyprland animates from where the window is now
+  -- straight to the strip, and the neighbours re-tile in step with it.
   if w.fullscreen == 1 then
     hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "unset", mode = "maximized" }))
   elseif w.fullscreen == 2 then
@@ -220,39 +221,31 @@ function M.minimize(w)
   if not w.floating then
     hl.dispatch(hl.dsp.window.float({ window = w, action = "enable" }))
   end
-  hl.dispatch(hl.dsp.window.resize({ window = w, x = sw, y = sh }))
-  hl.dispatch(hl.dsp.window.move({ window = w, x = ax, y = ay }))
+  local tx, ty, tw, th = tray_target(ax, sw, mon)
+  -- resize first: Hyprland keeps the centre on resize, then move pins the spot
+  hl.dispatch(hl.dsp.window.resize({ window = w, x = tw, y = th }))
+  hl.dispatch(hl.dsp.window.move({ window = w, x = tx, y = ty }))
 
-  -- Next tick: shrink toward the bottom edge, then stash it once it lands.
   local function put_back(win)
     hl.dispatch(hl.dsp.window.resize({ window = win, x = sw, y = sh }))
     hl.dispatch(hl.dsp.window.move({ window = win, x = ax, y = ay }))
     apply_final_state(win, state)
   end
-  after(30, function()
-    if M.op[addr] ~= token then M.pending = math.max(0, M.pending - 1) return end
-    local w2 = find(addr)
-    if not w2 then M.pending = math.max(0, M.pending - 1) forget(addr) return end
-    if M.shutting_down then M.pending = math.max(0, M.pending - 1) put_back(w2) forget(addr) return end
-    local tx, ty, tw, th = tray_target(ax, sw, mon)
-    -- resize first: Hyprland keeps the centre on resize, then move pins the spot
-    hl.dispatch(hl.dsp.window.resize({ window = w2, x = tw, y = th }))
-    hl.dispatch(hl.dsp.window.move({ window = w2, x = tx, y = ty }))
-    after(M.anim_ms, function()
-      M.pending = math.max(0, M.pending - 1)
-      if M.op[addr] ~= token then return end
-      local w3 = find(addr)
-      if not w3 then forget(addr) return end
-      if M.shutting_down then
-        -- Uninstall started mid-animation: put it back instead of stashing it.
-        put_back(w3)
-        forget(addr)
-        return
-      end
-      hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
-      table.insert(M.stack, addr)
-      M.busy[addr] = nil
-    end)
+  -- Once it has landed on the strip, stash it.
+  after(M.anim_ms, function()
+    M.pending = math.max(0, M.pending - 1)
+    if M.op[addr] ~= token then return end
+    local w3 = find(addr)
+    if not w3 then forget(addr) return end
+    if M.shutting_down then
+      -- Uninstall started mid-animation: put it back instead of stashing it.
+      put_back(w3)
+      forget(addr)
+      return
+    end
+    hl.dispatch(hl.dsp.window.move({ window = w3, workspace = M.workspace, follow = false }))
+    table.insert(M.stack, addr)
+    M.busy[addr] = nil
   end)
   return true
 end
@@ -291,18 +284,31 @@ function M.restore(addr)
     if M.stack[i] == addr then table.remove(M.stack, i) end
   end
 
-  -- ...then grow up into place and hand it back to the layout.
+  -- ...then, next tick, one motion to where it belongs. A tiled window goes
+  -- straight back into the layout (Hyprland animates the strip into its slot,
+  -- and the neighbours make room at the same time); a floating one grows to
+  -- its saved geometry.
   after(30, function()
     if M.op[addr] ~= token then return end
     local w2 = find(addr)
     if not w2 then forget(addr) return end
-    hl.dispatch(hl.dsp.window.resize({ window = w2, x = sw, y = sh }))
-    hl.dispatch(hl.dsp.window.move({ window = w2, x = ax, y = ay }))
+    local big = s.maximized or s.fullscreen
+    if s.floating or big then
+      -- Floating windows grow to their saved geometry. Maximized/fullscreen
+      -- ones grow to full size the same way: Hyprland drops a maximize that
+      -- is requested within ~150 ms of a workspace move, so the real
+      -- maximize waits for the end (where it changes nothing visible).
+      hl.dispatch(hl.dsp.window.resize({ window = w2, x = sw, y = sh }))
+      hl.dispatch(hl.dsp.window.move({ window = w2, x = ax, y = ay }))
+    else
+      -- Tiled: hand it straight to the layout, one motion from strip to slot.
+      apply_final_state(w2, s)
+    end
     after(M.anim_ms, function()
       if M.op[addr] ~= token then return end
       local w3 = find(addr)
       if not w3 then forget(addr) return end
-      apply_final_state(w3, s)
+      if s.floating then clear_state_tag(w3) elseif big then apply_final_state(w3, s) end
       M.saved[addr] = nil
       M.busy[addr] = nil
     end)

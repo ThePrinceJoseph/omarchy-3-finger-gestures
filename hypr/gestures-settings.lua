@@ -33,4 +33,12 @@ return {
   -- How many windows the tray holds before swipe down says "full". 1 to 12;
   -- five keeps titles readable, twelve is icons with a few letters each.
   tray_max = 5,
+
+  -- Tray height in pixels.
+  tray_height = 40,
+
+  -- true: the tray reserves space like the bar, so tiled windows shrink to make
+  -- room whenever it appears or disappears. false: it floats over the bottom
+  -- edge and nothing else moves (smoother).
+  tray_reserve_space = false,
 }

@@ -31,6 +31,12 @@ local defaults = {
   tray_key = "SUPER + M",
   -- How many windows the tray holds before swipe down says "full" (1..12).
   tray_max = 5,
+  -- Tray height in logical pixels.
+  tray_height = 40,
+  -- true: the tray reserves space like the bar (tiled windows shrink to make
+  -- room whenever it appears or disappears). false: it floats over the bottom
+  -- edge, and nothing else moves.
+  tray_reserve_space = false,
 }
 
 local opt = {}
@@ -91,6 +97,13 @@ end
 
 if opt.minimize and Minimize then
   Minimize.max_windows = math.max(1, math.min(12, math.floor(tonumber(opt.tray_max) or 5)))
+  Minimize.tray_height = math.max(24, math.floor(tonumber(opt.tray_height) or 40))
+  -- The tray plugin reads its look from this file (it watches for changes).
+  local f = io.open(os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-settings.json", "w")
+  if f then
+    f:write(string.format('{"height": %d, "reserveSpace": %s}\n', Minimize.tray_height, opt.tray_reserve_space and "true" or "false"))
+    f:close()
+  end
   hl.gesture({ fingers = 3, direction = "down", action = function() Minimize.minimize() end })
   hl.gesture({ fingers = 3, direction = "up", action = function() Minimize.restore_selected() end })
   if opt.tray_key then
