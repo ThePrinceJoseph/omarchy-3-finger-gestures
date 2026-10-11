@@ -14,10 +14,10 @@ import qs.Commons
 //
 // Selection: hovering selects. The dock takes the keyboard as soon as a tile
 // lands (and on the tray key), so Left/Right (or Tab, or a two-finger swipe
-// left/right on the touchpad, see Minimize.dock_focus) move the selection,
-// Enter/Up restores, Backspace/Delete closes. Escape, Down or the tray key
-// hand the keyboard back; restoring a tile, emptying the dock or switching
-// workspace does too.
+// left/right anywhere on the screen) move the selection, Enter/Up restores,
+// Backspace/Delete closes. Escape, Down, the tray key or a click outside the
+// dock hand the keyboard back; restoring a tile, emptying the dock or
+// switching workspace does too.
 // The selected tile is what a three-finger swipe up brings back (its address
 // is written to `selectedPath`, which minimize.lua reads).
 
@@ -36,6 +36,7 @@ Item {
   property bool reserveSpace: false
   property bool thumbnails: true
   property bool focusBlur: false
+  property bool naturalScroll: true
 
   property var windows: []
   property int selectedIndex: -1
@@ -57,6 +58,7 @@ Item {
       root.reserveSpace = cfg.reserveSpace === true
       root.thumbnails = cfg.thumbnails !== false
       root.focusBlur = cfg.focusBlur === true
+      root.naturalScroll = cfg.naturalScroll !== false
     } catch (e) {
       root.log("could not parse " + root.settingsPath + ": " + e)
     }
@@ -253,7 +255,6 @@ Item {
     else if (cmd === "flyIn") root.startFlight(payload, false, "")
     else if (cmd === "retarget") root.retargetFlight(payload)
     else if (cmd === "endFlight") root.endFlight("")
-    else if (cmd === "select") root.moveSelection(parseInt(payload) || 0)
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -270,18 +271,8 @@ Item {
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
           || name === "configreloaded") refreshTimer.restart()
-      // A reload throws Lua's state away, scroll binds included.
-      if (name === "configreloaded" && root.focusMode) root.sendDockFocus()
     }
   }
-
-  // Two-finger swipes move the highlight only while the dock holds the
-  // keyboard: Lua binds the horizontal scroll for just that time.
-  function sendDockFocus() {
-    Quickshell.execDetached(["hyprctl", "dispatch",
-      "(function() if Minimize and Minimize.dock_focus then Minimize.dock_focus(" + (root.focusMode ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
-  }
-  onFocusModeChanged: sendDockFocus()
 
   Component.onCompleted: refresh()
 
@@ -541,10 +532,16 @@ Item {
     }
   }
 
-  // Scrim: while the dock has the keyboard, everything else on screen is
-  // blurred and slightly dimmed so it is obvious where typing goes. A
-  // workspace with no windows stays clear, suggesting that is where the tiles
-  // are headed. Drawn on the Top layer so the dock (Overlay) is always above it.
+  // Catcher and scrim: while the dock has the keyboard, a full-screen surface
+  // sits under the cursor on the focused screen (the dock, on the Overlay
+  // layer, stays above it). It is what lets two-finger swipes reach the dock:
+  // Hyprland hands scroll to the surface under the cursor, and scroll binds
+  // fire for mouse wheels only. Swiping left/right moves the highlight, a
+  // click anywhere outside the dock hands the keyboard back. With focus_blur
+  // it is also the scrim: a faint tint and a light blur of everything behind,
+  // except on a workspace with no windows, which stays clear to suggest that
+  // is where the tiles are headed. On the Top layer, so a true fullscreen
+  // window (which Hyprland draws above Top) is the one place it does not reach.
   function workspaceHasWindows(scr) {
     var mons = Hyprland.monitors.values
     for (var i = 0; i < mons.length; i++) {
@@ -564,6 +561,23 @@ Item {
   onScrimAnywhereChanged: Quickshell.execDetached(["hyprctl", "dispatch",
     "(function() if Minimize and Minimize.scrim then Minimize.scrim(" + (root.scrimAnywhere ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
 
+  // Two-finger travel adds up; every swipeStep px of it moves the highlight
+  // one tile. A pause forgets the remainder, so the next swipe starts clean.
+  readonly property int swipeStep: Style.space(48)
+  property real swipeAcc: 0
+  Timer { id: swipeReset; interval: 250; onTriggered: root.swipeAcc = 0 }
+  function swipe(dx) {
+    // Qt reports a scroll "to the left" as a positive x; with natural
+    // scrolling that is the fingers moving right. The highlight follows the fingers.
+    root.swipeAcc += root.naturalScroll ? dx : -dx
+    swipeReset.restart()
+    while (Math.abs(root.swipeAcc) >= root.swipeStep) {
+      var dir = root.swipeAcc > 0 ? 1 : -1
+      root.moveSelection(dir)
+      root.swipeAcc -= dir * root.swipeStep
+    }
+  }
+
   Variants {
     model: Quickshell.screens
 
@@ -571,14 +585,32 @@ Item {
       id: scrim
       required property var modelData
       screen: modelData
-      visible: root.focusBlur && root.focusMode && root.windows.length > 0 && root.workspaceHasWindows(scrim.screen)
+      readonly property bool onFocusedScreen: {
+        var focused = Hyprland.focusedMonitor
+        if (!focused || !focused.name || !scrim.screen || !scrim.screen.name) return true
+        return focused.name === scrim.screen.name
+      }
+      readonly property bool tinted: root.focusBlur && root.workspaceHasWindows(scrim.screen)
+      visible: root.focusMode && root.windows.length > 0 && scrim.onFocusedScreen
       anchors { top: true; bottom: true; left: true; right: true }
-      color: Qt.rgba(0, 0, 0, 0.08)
+      color: tinted ? Qt.rgba(0, 0, 0, 0.08) : "transparent"
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.namespace: "omarchy-minimized-scrim"
       WlrLayershell.layer: WlrLayer.Top
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-      mask: Region {}
+
+      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onPressed: root.focusMode = false
+        onWheel: function(wheel) {
+          // A touchpad reports pixels; a wheel tilt only an angle (120 per notch).
+          var dx = wheel.pixelDelta.x, dy = wheel.pixelDelta.y
+          if (dx === 0 && dy === 0) { dx = wheel.angleDelta.x / 120 * root.swipeStep; dy = wheel.angleDelta.y }
+          if (Math.abs(dx) >= Math.abs(dy)) root.swipe(dx)
+          wheel.accepted = true
+        }
+      }
     }
   }
 
@@ -941,6 +973,8 @@ Item {
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
     function layout(): string { return String(root.dockGeometry.width) + "x" + String(root.dockGeometry.height) + " at x=" + String(root.dockGeometry.x) }
+    // Debug: feed the two-finger swipe <dx> px of travel, as the catcher would.
+    function swipe(dx: int): string { root.swipe(dx); return root.selectedAddress }
     // Debug: force the hover preview for tile <index> (-1 hides).
     function preview(index: int): string { root.hoverIndex = index; root.previewIndex = index; return "ok" }
   }

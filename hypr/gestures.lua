@@ -97,9 +97,10 @@ elseif opt.minimize and Minimize then
   -- The dock plugin reads its look from this file (it watches for changes).
   local f = io.open(os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-settings.json", "w")
   if f then
-    f:write(string.format('{"reserveSpace": %s, "thumbnails": %s, "focusBlur": %s}\n',
+    local natural = hl.get_config("input.touchpad.natural_scroll")
+    f:write(string.format('{"reserveSpace": %s, "thumbnails": %s, "focusBlur": %s, "naturalScroll": %s}\n',
       opt.tray_reserve_space and "true" or "false", Minimize.thumbnails and "true" or "false",
-      opt.focus_blur and "true" or "false"))
+      opt.focus_blur and "true" or "false", (natural == true or natural == 1) and "true" or "false"))
     f:close()
   end
   hl.gesture({ fingers = 3, direction = "down", action = function() Minimize.minimize() end })
