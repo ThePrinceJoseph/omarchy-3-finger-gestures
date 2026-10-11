@@ -317,6 +317,25 @@ Item {
     return { x: dockX + root.pad + index * (w + root.gap), y: dockY + root.pad, w: w, h: h }
   }
 
+  // Two-finger travel adds up in scroll units (about a pixel of finger travel
+  // each, after Hyprland's touchpad scroll_factor; Omarchy's 0.4 makes a tile
+  // roughly 75 px of travel). A pause forgets the remainder, so the next
+  // swipe starts clean.
+  readonly property int swipeStep: 30
+  property real swipeAcc: 0
+  Timer { id: swipeReset; interval: 250; onTriggered: root.swipeAcc = 0 }
+  function swipe(dx) {
+    // Qt reports a scroll "to the left" as a positive x; with natural
+    // scrolling that is the fingers moving right. The highlight follows the fingers.
+    root.swipeAcc += root.naturalScroll ? dx : -dx
+    swipeReset.restart()
+    while (Math.abs(root.swipeAcc) >= root.swipeStep) {
+      var dir = root.swipeAcc > 0 ? 1 : -1
+      root.moveSelection(dir)
+      root.swipeAcc -= dir * root.swipeStep
+    }
+  }
+
   // One dock per screen; only the one on the focused screen takes the keyboard.
   Variants {
     model: Quickshell.screens
@@ -351,6 +370,32 @@ Item {
 
       onWidthChanged: if (dock.onFocusedScreen) root.dockGeometry = { x: Math.round(((dock.screen ? dock.screen.width : 1280) - width) / 2), width: width, height: height }
       onHeightChanged: if (dock.onFocusedScreen) root.dockGeometry = { x: Math.round(((dock.screen ? dock.screen.width : 1280) - width) / 2), width: width, height: height }
+
+      // While the dock holds the keyboard, Hyprland sends every pointer event
+      // on the screen to it, wherever the cursor is (an exclusive layer surface
+      // gets all pointer focus). This item reaches far past the card to catch
+      // them: two-finger travel (a horizontal scroll) adds up and moves the
+      // highlight one tile per swipeStep, and a click outside the card hands
+      // the keyboard back. Declared first, so the tiles stay on top.
+      MouseArea {
+        id: outside
+        x: -20000; y: -20000; width: 40000; height: 40000
+        enabled: root.focusMode
+        acceptedButtons: Qt.AllButtons
+        onPressed: function(event) {
+          if (event.x < -outside.x || event.y < -outside.y || event.x >= -outside.x + card.width || event.y >= -outside.y + card.height) root.focusMode = false
+          else event.accepted = false
+        }
+        onWheel: function(wheel) {
+          wheel.accepted = true
+          // Qt hands finger scrolling over as an angle, 8 per scroll unit and
+          // no pixelDelta on Wayland; a mouse wheel notch is a multiple of 120.
+          var ax = wheel.angleDelta.x, ay = wheel.angleDelta.y
+          if (ax === 0 || Math.abs(ax) < Math.abs(ay)) return
+          if (Math.abs(ax) === 120 && wheel.pixelDelta.x === 0) root.swipe(ax / 120 * root.swipeStep)  // a notch per tile
+          else root.swipe(wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : ax / 8)
+        }
+      }
 
       Rectangle {
         id: card
@@ -532,16 +577,10 @@ Item {
     }
   }
 
-  // Catcher and scrim: while the dock has the keyboard, a full-screen surface
-  // sits under the cursor on the focused screen (the dock, on the Overlay
-  // layer, stays above it). It is what lets two-finger swipes reach the dock:
-  // Hyprland hands scroll to the surface under the cursor, and scroll binds
-  // fire for mouse wheels only. Swiping left/right moves the highlight, a
-  // click anywhere outside the dock hands the keyboard back. With focus_blur
-  // it is also the scrim: a faint tint and a light blur of everything behind,
-  // except on a workspace with no windows, which stays clear to suggest that
-  // is where the tiles are headed. On the Top layer, so a true fullscreen
-  // window (which Hyprland draws above Top) is the one place it does not reach.
+  // Scrim: while the dock has the keyboard, everything else on screen is
+  // blurred and slightly dimmed so it is obvious where typing goes. A
+  // workspace with no windows stays clear, suggesting that is where the tiles
+  // are headed. Drawn on the Top layer so the dock (Overlay) is always above it.
   function workspaceHasWindows(scr) {
     var mons = Hyprland.monitors.values
     for (var i = 0; i < mons.length; i++) {
@@ -561,23 +600,6 @@ Item {
   onScrimAnywhereChanged: Quickshell.execDetached(["hyprctl", "dispatch",
     "(function() if Minimize and Minimize.scrim then Minimize.scrim(" + (root.scrimAnywhere ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
 
-  // Two-finger travel adds up; every swipeStep px of it moves the highlight
-  // one tile. A pause forgets the remainder, so the next swipe starts clean.
-  readonly property int swipeStep: Style.space(48)
-  property real swipeAcc: 0
-  Timer { id: swipeReset; interval: 250; onTriggered: root.swipeAcc = 0 }
-  function swipe(dx) {
-    // Qt reports a scroll "to the left" as a positive x; with natural
-    // scrolling that is the fingers moving right. The highlight follows the fingers.
-    root.swipeAcc += root.naturalScroll ? dx : -dx
-    swipeReset.restart()
-    while (Math.abs(root.swipeAcc) >= root.swipeStep) {
-      var dir = root.swipeAcc > 0 ? 1 : -1
-      root.moveSelection(dir)
-      root.swipeAcc -= dir * root.swipeStep
-    }
-  }
-
   Variants {
     model: Quickshell.screens
 
@@ -585,32 +607,14 @@ Item {
       id: scrim
       required property var modelData
       screen: modelData
-      readonly property bool onFocusedScreen: {
-        var focused = Hyprland.focusedMonitor
-        if (!focused || !focused.name || !scrim.screen || !scrim.screen.name) return true
-        return focused.name === scrim.screen.name
-      }
-      readonly property bool tinted: root.focusBlur && root.workspaceHasWindows(scrim.screen)
-      visible: root.focusMode && root.windows.length > 0 && scrim.onFocusedScreen
+      visible: root.focusBlur && root.focusMode && root.windows.length > 0 && root.workspaceHasWindows(scrim.screen)
       anchors { top: true; bottom: true; left: true; right: true }
-      color: tinted ? Qt.rgba(0, 0, 0, 0.08) : "transparent"
+      color: Qt.rgba(0, 0, 0, 0.08)
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.namespace: "omarchy-minimized-scrim"
       WlrLayershell.layer: WlrLayer.Top
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-
-      MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onPressed: root.focusMode = false
-        onWheel: function(wheel) {
-          // A touchpad reports pixels; a wheel tilt only an angle (120 per notch).
-          var dx = wheel.pixelDelta.x, dy = wheel.pixelDelta.y
-          if (dx === 0 && dy === 0) { dx = wheel.angleDelta.x / 120 * root.swipeStep; dy = wheel.angleDelta.y }
-          if (Math.abs(dx) >= Math.abs(dy)) root.swipe(dx)
-          wheel.accepted = true
-        }
-      }
+      mask: Region {}
     }
   }
 
@@ -973,7 +977,7 @@ Item {
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
     function layout(): string { return String(root.dockGeometry.width) + "x" + String(root.dockGeometry.height) + " at x=" + String(root.dockGeometry.x) }
-    // Debug: feed the two-finger swipe <dx> px of travel, as the catcher would.
+    // Debug: feed the two-finger swipe <dx> scroll units of travel.
     function swipe(dx: int): string { root.swipe(dx); return root.selectedAddress }
     // Debug: force the hover preview for tile <index> (-1 hides).
     function preview(index: int): string { root.hoverIndex = index; root.previewIndex = index; return "ok" }
