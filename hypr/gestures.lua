@@ -4,9 +4,10 @@
 -- Three-finger touchpad gestures for Omarchy 4 (Hyprland 0.56, Lua config):
 --   left / right  change workspace, gliding with your fingers
 --   down          minimize the focused window into a tray at the bottom
---   up            while the tray has the keyboard: bring the selected minimized
---                 window back; otherwise: offer to close the focused window
---                 (a quick double swipe up closes it)
+--   up            dismiss notifications if any are up; else, while the tray has
+--                 the keyboard: bring the selected minimized window back;
+--                 otherwise: offer to close the focused window (a quick double
+--                 swipe up closes it)
 --   double tap    maximize the focused window or put it back (the top bar stays
 --                 visible); while the tray has the keyboard, whether the
 --                 selected tile comes back maximized
@@ -116,16 +117,19 @@ elseif opt.minimize and Minimize then
       tonumber(opt.swipe_min_speed_to_force) or 25, scroll_factor))
     f:close()
   end
-  -- Down minimizes, or puts away a close prompt. Up brings the selected tile
-  -- back while the tray has the keyboard, or onto an empty workspace;
-  -- otherwise it offers to close the window on screen (a quick double swipe
-  -- up closes it).
+  -- Down minimizes, or puts away a close prompt. Up dismisses notifications
+  -- first of all; else brings the selected tile back while the tray has the
+  -- keyboard, or onto an empty workspace; else offers to close the window on
+  -- screen (a quick double swipe up closes it).
   hl.gesture({ fingers = 3, direction = "down", action = function()
     if not Minimize.cancel_prompt() then Minimize.minimize() end
   end })
-  hl.gesture({ fingers = 3, direction = "up", action = function()
-    if Minimize.dock_focused then Minimize.restore_selected_keep() else Minimize.up_idle() end
-  end })
+  -- Up runs in two halves: the moment the fingers set off (so a close prompt
+  -- is up at once) and when they lift (see minimize.lua).
+  hl.gesture({ fingers = 3, direction = "up", action = {
+    start = function() Minimize.swipe_up_start() end,
+    finish = function(e) Minimize.swipe_up_finish(type(e) == "table" and e.cancelled == true) end,
+  } })
   if opt.tray_key and opt.tray_key ~= "" and opt.tray_key ~= "none" then
     o.bind(opt.tray_key, "Minimized tray: toggle keyboard", "omarchy-shell minimized-tray focus")
   end

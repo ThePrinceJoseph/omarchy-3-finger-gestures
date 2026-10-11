@@ -11,8 +11,9 @@
 --                            recently minimized window.
 -- Minimize.restore_latest()  same, always the most recently minimized window.
 -- Minimize.restore_all()     everything at once. Minimize.shutdown() for uninstall.
--- Minimize.close_swipe()     three fingers up while the dock is idle: prompt to
---                            close the focused window; a quick second swipe closes.
+-- Minimize.swipe_up_start()/swipe_up_finish(cancelled)  three fingers up: dismiss
+--                            notifications, restore the selected tile, or close the
+--                            window on screen (prompt, quick double swipe to confirm).
 --
 -- A window that was maximized or fullscreen comes back maximized (the top bar
 -- stays visible) onto an empty workspace, and tiles (or floats, if it
@@ -799,19 +800,21 @@ end
 
 -- ------------------------------------------------------------------- close
 
--- Three fingers up while the dock does not hold the keyboard: close the
--- window on screen, after a prompt the dock draws over it (the window blurred
--- behind it). A first swipe waits M.double_swipe_ms: a second swipe in that
--- time closes the window without any prompt; otherwise the prompt comes up.
--- Once it is up, the swipe that brought it does not count: it takes a fresh
--- quick double swipe (or a click on the prompt) to close, and a single swipe
--- only shakes it. Three fingers down, a workspace switch or M.prompt_ms of
--- nothing puts it away.
+-- Three fingers up. First of all, if a notification is on screen, the swipe
+-- dismisses it and does nothing else. Otherwise, while the dock holds the
+-- keyboard (or on an empty workspace with tiles waiting) it brings the
+-- selected tile back. Otherwise it closes the window on screen: the prompt
+-- comes up the moment the fingers start moving (Hyprland calls
+-- swipe_up_start as soon as the direction is known), with the window blurred
+-- behind it, and a second swipe up starting within M.double_swipe_ms of the
+-- first lifting closes it. A later single swipe only shakes the prompt. A
+-- click on the prompt closes too. Three fingers down, a workspace switch or
+-- M.prompt_ms of nothing puts the prompt away.
 M.prompt_ms = 3000
-M.double_swipe_ms = 350  -- a second swipe within this closes; the prompt shows after it
-M.prompt = nil          -- { addr, token } while the prompt is up
-M.pending_prompt = nil  -- { addr, token } while a first swipe waits to become a prompt
-M.recent_up = nil       -- { addr, token } for M.double_swipe_ms after a swipe on the prompt
+M.double_swipe_ms = 400
+M.prompt = nil      -- { addr, token } while the prompt is up
+M.recent_up = nil   -- { addr, token } for M.double_swipe_ms after a swipe up lifted
+M.up_swipe = nil    -- what the swipe in progress is for, between start and finish
 local prompt_tokens = 0
 
 local function hide_prompt()
@@ -821,89 +824,118 @@ local function hide_prompt()
   set_blur("prompt", nil)
 end
 
+local function notifications_up()
+  local ok, layers = pcall(hl.get_layers)
+  if not ok or type(layers) ~= "table" then return false end
+  for _, l in ipairs(layers) do
+    if l.namespace == "omarchy-notifications" and l.mapped ~= false then return true end
+  end
+  return false
+end
+
+local function prompt_expiry(token)
+  after(M.prompt_ms, function()
+    if M.prompt and M.prompt.token == token then hide_prompt() end
+  end)
+end
+
+local function show_prompt(w, token)
+  local ax, ay = vec(w.at)
+  local sw, sh = vec(w.size)
+  local mon = monitor(w.monitor)
+  M.prompt = { addr = w.address, token = token }
+  set_blur("prompt", M.prompt_blur)
+  tray("closePrompt", rect_json(w.address, ax, ay, sw, sh, mon, ',"title":' .. json_string(w.title ~= "" and w.title or w.class)))
+  prompt_expiry(token)
+end
+
 function M.close_window(addr)
   hide_prompt()
   M.recent_up = nil
   M.soft_close(addr)
 end
 
-function M.close_swipe()
-  -- Only a window on the workspace on screen (Hyprland's active window can be
-  -- a stale one from another workspace, or one already in the dock).
-  local w = target_window()
-  if not w or (w.workspace and (w.workspace.name == M.workspace or w.workspace.name == M.closed_ws)) then return false end
-  local addr = w.address
-  prompt_tokens = prompt_tokens + 1
-  local token = prompt_tokens
-
-  -- The second half of a quick double swipe: close. The prompt never showed.
-  if M.pending_prompt and M.pending_prompt.addr == addr then
-    M.pending_prompt = nil
-    M.close_window(addr)
-    return true
+-- Hyprland calls this when three fingers have started moving up.
+function M.swipe_up_start()
+  M.up_swipe = nil
+  if notifications_up() then
+    hl.exec_cmd("omarchy-shell notifications dismissAll")
+    M.up_swipe = { what = "notifications" }
+    return "notifications"
   end
-
-  -- The prompt is up: it takes a fresh double swipe. The first swipe of it
-  -- (or a lone one) shakes the prompt; a second within M.double_swipe_ms
-  -- closes. The swipe that brought the prompt up does not count.
-  if M.prompt and M.prompt.addr == addr then
-    if M.recent_up and M.recent_up.addr == addr then
-      M.close_window(addr)
-      return true
-    end
-    M.recent_up = { addr = addr, token = token }
-    after(M.double_swipe_ms, function()
-      if M.recent_up and M.recent_up.token == token then M.recent_up = nil end
-    end)
-    M.prompt.token = token
-    tray("closePromptNudge")
-    after(M.prompt_ms, function()
-      if M.prompt and M.prompt.token == token then hide_prompt() end
-    end)
-    return true
+  if M.dock_focused then
+    M.up_swipe = { what = "restore", keep = true }
+    return "restore"
   end
-
-  -- A first swipe: wait to see if it is a double swipe before asking.
-  M.pending_prompt = { addr = addr, token = token }
-  after(M.double_swipe_ms, function()
-    if not (M.pending_prompt and M.pending_prompt.token == token) then return end
-    M.pending_prompt = nil
-    local w2 = find(addr)
-    -- Gone, or off to the dock or the undo workspace meanwhile: nothing to ask.
-    if not w2 or (w2.workspace and tostring(w2.workspace.name):match("^special:")) then return end
-    local ax, ay = vec(w2.at)
-    local sw, sh = vec(w2.size)
-    local mon = monitor(w2.monitor)
-    M.recent_up = nil
-    M.prompt = { addr = addr, token = token }
-    set_blur("prompt", M.prompt_blur)
-    tray("closePrompt", rect_json(addr, ax, ay, sw, sh, mon, ',"title":' .. json_string(w2.title ~= "" and w2.title or w2.class)))
-    after(M.prompt_ms, function()
-      if M.prompt and M.prompt.token == token then hide_prompt() end
-    end)
-  end)
-  return true
-end
-
--- Three fingers up while the dock is idle: on a workspace with nothing on it
--- there is nothing to close, so bring the selected tile here; otherwise offer
--- to close the window on screen.
-function M.up_idle()
   local mon = hl.get_monitor_at_cursor() or hl.get_active_monitor()
   local ws = mon and mon.active_workspace or hl.get_active_workspace()
   local here = ws and hl.get_workspace_windows(tostring(ws.id)) or {}
   if #here == 0 and #(hl.get_workspace_windows(M.workspace) or {}) > 0 then
+    M.up_swipe = { what = "restore" }
+    return "restore"
+  end
+  -- Only a window on the workspace on screen (Hyprland's active window can be
+  -- a stale one from another workspace, or one already in the dock).
+  local w = target_window()
+  if not w or (w.workspace and tostring(w.workspace.name):match("^special:")) then return "none" end
+  local addr = w.address
+  -- The second half of a quick double swipe: close now.
+  if M.recent_up and M.recent_up.addr == addr then
+    M.close_window(addr)
+    M.up_swipe = { what = "closed" }
+    return "closed"
+  end
+  prompt_tokens = prompt_tokens + 1
+  local token = prompt_tokens
+  local opened = false
+  if not (M.prompt and M.prompt.addr == addr) then
+    show_prompt(w, token)
+    opened = true
+  end
+  M.up_swipe = { what = "close", addr = addr, token = token, opened = opened }
+  return opened and "prompt" or "again"
+end
+
+-- ...and this when they lift (cancelled: the swipe was abandoned).
+function M.swipe_up_finish(cancelled)
+  local s = M.up_swipe
+  M.up_swipe = nil
+  if not s or s.what == "notifications" or s.what == "closed" then return false end
+  if s.what == "restore" then
+    if cancelled then return false end
+    if s.keep then return M.restore_selected_keep() end
     return M.restore_selected()
   end
-  return M.close_swipe()
+  -- A close swipe.
+  if cancelled then
+    if s.opened then hide_prompt() end
+    return false
+  end
+  local addr, token = s.addr, s.token
+  M.recent_up = { addr = addr, token = token }
+  after(M.double_swipe_ms, function()
+    if M.recent_up and M.recent_up.token == token then M.recent_up = nil end
+  end)
+  if not s.opened and M.prompt and M.prompt.addr == addr then
+    -- A lone swipe on a prompt that was already up: not the answer.
+    M.prompt.token = token
+    tray("closePromptNudge")
+    prompt_expiry(token)
+  end
+  return true
 end
+
+-- One whole swipe up at once, for scripts and hyprctl.
+function M.swipe_up()
+  M.swipe_up_start()
+  return M.swipe_up_finish(false)
+end
+M.up_idle = M.swipe_up
+M.close_swipe = M.swipe_up
 
 -- Three fingers down while the prompt is up cancels it (and minimizes
 -- nothing). Returns true if there was a prompt to put away.
 function M.cancel_prompt()
-  -- A swipe up still waiting to become a prompt: drop it, but let the swipe
-  -- down do its own job (minimize), since nothing was on screen to cancel.
-  M.pending_prompt = nil
   if not M.prompt then return false end
   M.recent_up = nil
   hide_prompt()
