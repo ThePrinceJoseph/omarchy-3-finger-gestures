@@ -5,6 +5,8 @@
 --   left / right  change workspace, gliding with your fingers
 --   down          minimize the focused window into a tray at the bottom
 --   up            bring the selected minimized window back (see minimize.lua)
+--   double tap    toggle fullscreen on the focused window; while the tray has
+--                 the keyboard, whether the selected tile comes back fullscreen
 --
 -- Settings come from the bar widget (or `omarchy bar set threefinger.gestures
 -- <key> <value>`), which writes ~/.config/hypr/gestures-settings.lua through
@@ -24,6 +26,7 @@ local defaults = {
   tray_thumbnails = true,
   tray_reserve_space = false,
   focus_blur = false,           -- blur/dim everything but the dock while it has the keyboard
+  double_tap_fullscreen = true, -- three-finger double tap toggles fullscreen
 }
 
 local opt = {}
@@ -116,4 +119,64 @@ elseif opt.minimize and Minimize then
   end
 elseif opt.minimize then
   hl.notification.create({ text = "3 Finger Gestures: minimize.lua is not loaded (require it before gestures.lua)", timeout = 8000, icon = "warning" })
+end
+
+-- ---------------------------------------------------------------- double tap
+
+-- libinput turns a three-finger tap into a middle click, so the double tap is
+-- a bind on the middle button, limited to the touchpads (a mouse's or
+-- trackpoint's middle button is left alone). A second tap within
+-- double_tap_ms toggles fullscreen; a lone tap is handed on as the middle
+-- click it was (paste, open in a new tab), just double_tap_ms late. While the
+-- tray has the keyboard, the double tap goes to the tray instead.
+local double_tap_ms = 300
+
+-- Hyprland names input devices by lowercasing their kernel names and turning
+-- spaces and commas into dashes.
+local function touchpad_names()
+  local names = {}
+  local p = io.popen("cat /sys/class/input/event*/device/name 2>/dev/null")
+  if not p then return names end
+  for line in p:lines() do
+    local lower = line:lower()
+    if lower:match("touchpad") or lower:match("trackpad") or lower:match("clickpad") then
+      table.insert(names, (lower:gsub("[ ,\n]", "-")))
+    end
+  end
+  p:close()
+  return names
+end
+
+-- One three-finger tap (a global, so it can be exercised with hyprctl dispatch).
+ThreeFinger = ThreeFinger or {}
+local waiting = 0  -- a lone tap is pending; its number, so a stale timer can tell
+function ThreeFinger.tap()
+  if waiting > 0 then
+    waiting = 0
+    if Minimize and Minimize.dock_focused then
+      hl.dispatch(hl.dsp.event("threefinger doubletap"))
+    else
+      local w = hl.get_active_window()
+      if w then hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "toggle", mode = "fullscreen" })) end
+    end
+    return
+  end
+  waiting = waiting + 1
+  local mine = waiting
+  hl.timer(function()
+    if waiting ~= mine then return end
+    waiting = 0
+    -- A lone tap in the tray means nothing; elsewhere it is a middle click.
+    if not (Minimize and Minimize.dock_focused) then
+      hl.dispatch(hl.dsp.send_shortcut({ mods = "", key = "mouse:274" }))
+    end
+  end, { timeout = double_tap_ms, type = "oneshot" })
+end
+
+if opt.double_tap_fullscreen then
+  local pads = touchpad_names()
+  if #pads > 0 then
+    hl.bind("mouse:274", function() ThreeFinger.tap() end,
+      { description = "Three-finger double tap: toggle fullscreen", device = { inclusive = true, list = pads } })
+  end
 end

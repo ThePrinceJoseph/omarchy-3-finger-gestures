@@ -10,6 +10,7 @@ Omarchy shell plugin:
 | **Three fingers up** | Bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. |
 | **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile, stopping at the ends. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
 | **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. |
+| **Three-finger double tap** | Toggle fullscreen on the focused window. While the tray has the keyboard: flip whether the selected tile comes back fullscreen (a 󰊓 on the tile shows it will). |
 
 The dock shows one tile per minimized window (a picture of the window, its app icon
 and title) and only exists while something is minimized. Hover a tile for a ✕ and a
@@ -21,8 +22,9 @@ keyboard back. **SUPER+M** hands it to the tray again later. It holds five windo
 way to carry a few windows to another workspace, not a window list.
 
 Hyprland has no real "minimize", so the tray is backed by a hidden special workspace
-(`special:minimized`, separate from Omarchy's SUPER+S scratchpad). Maximized and
-fullscreen windows come back maximized and fullscreen.
+(`special:minimized`, separate from Omarchy's SUPER+S scratchpad). A maximized or
+fullscreen window comes back that way onto an empty workspace, and joins the layout
+onto one that already has windows. A three-finger double tap on its tile forces either way.
 
 ## Requirements
 
@@ -77,6 +79,7 @@ omarchy bar set threefinger.gestures tray_max 8
 | `tray_max` | `5` | How many windows the tray holds, 1 to 12. Swipe down on a full tray shows a notification. |
 | `tray_thumbnails` | `true` | A picture of each window in its tile, taken as it minimizes. |
 | `focus_blur` | `false` | While the dock has the keyboard, lightly blur and dim everything else. Empty workspaces stay clear. |
+| `double_tap_fullscreen` | `true` | Three-finger double tap toggles fullscreen (in the tray: how the selected tile comes back). A single three-finger tap is still a middle click, about 0.3 s late. |
 | `tray_reserve_space` | `false` | `true` makes tiled windows shrink to make room for the tray. `false` floats it over the bottom edge and nothing else moves. |
 
 The three `swipe_*` settings also drive the two-finger swipe in the tray, so one feel
@@ -119,10 +122,16 @@ Omarchy's window animation speed.
 - **Hyprland reloaded mid-animation?** Each window carries its saved state as a tag, and
   `minimize.lua` puts any stranded window straight back the next time it loads, maximized
   or fullscreen again if it was.
-- **Fullscreen windows.** The dock sits on the overlay layer, so it stays visible and
-  clickable even while a fullscreen window is up. Restoring a maximized and a fullscreen
-  window onto the same workspace at once can only keep one of them that way, since
-  Hyprland allows one fullscreen window per workspace.
+- **Fullscreen windows.** The dock sits on the overlay layer, so it stays visible,
+  clickable and swipeable even while a fullscreen window is up (the `focus_blur` tint
+  sits below fullscreen windows, so it does not show over one). Hyprland allows one
+  fullscreen window per workspace: a tile forced fullscreen onto a workspace with a
+  fullscreen window takes over from it.
+- **The double tap and middle clicks.** libinput turns a three-finger tap into a middle
+  click, so the double tap is a bind on the touchpad's middle button only (a mouse or
+  trackpoint middle button is untouched). A single tap is held for 0.3 s to see if a
+  second follows, then handed on as the middle click it was. Turn
+  `double_tap_fullscreen` off to get instant three-finger middle clicks back.
 - **Several monitors.** Flights are drawn on the monitor the window is on, and a window
   restored onto a smaller monitor is fitted to it.
 

@@ -15,7 +15,8 @@ import qs.Commons
 // Selection: hovering selects. The dock takes the keyboard as soon as a tile
 // lands (and on the tray key), so Left/Right (or Tab, or a two-finger swipe
 // left/right anywhere on the screen) move the selection, Enter/Up (or two
-// fingers up) restores,
+// fingers up) restores, a three-finger double tap flips whether the selected
+// tile comes back fullscreen (󰊓 on the tile),
 // Backspace/Delete closes. Escape, Down, the tray key or a click outside the
 // dock hand the keyboard back; restoring a tile, emptying the dock or
 // switching workspace does too.
@@ -160,7 +161,11 @@ Item {
         appClass: String(c["class"] || ""),
         icon: root.iconFor(c),
         thumb: "file://" + root.thumbDir + "/" + address.replace(/[^0-9a-zA-Z]/g, "") + ".jpg?t=" + Date.now(),
-        order: seen[address]
+        order: seen[address],
+        // From the tags minimize.lua keeps on the window: whether it was
+        // maximized/fullscreen, and a double-tap override ("full"/"tile").
+        savedBig: root.tagsSavedBig(c.tags),
+        mode: root.tagsMode(c.tags)
       })
     }
     next.sort(function(a, b) { return a.order - b.order })
@@ -180,6 +185,58 @@ Item {
     if (next.length === 0 || restored) root.focusMode = false
     else if (newest) root.focusMode = true
   }
+
+  function tagNames(tags) {
+    var out = []
+    for (var i = 0; tags && i < tags.length; i++) out.push(String(tags[i]).replace(/\*$/, ""))
+    return out
+  }
+  function tagsSavedBig(tags) {
+    var t = root.tagNames(tags)
+    for (var i = 0; i < t.length; i++) { var m = /^min_\d_(\d)_/.exec(t[i]); if (m) return m[1] !== "0" }
+    return false
+  }
+  function tagsMode(tags) {
+    var t = root.tagNames(tags)
+    if (t.indexOf("min_mode_full") !== -1) return "full"
+    if (t.indexOf("min_mode_tile") !== -1) return "tile"
+    return ""
+  }
+
+  // Whether a tile would come back maximized/fullscreen onto the workspace on
+  // screen now: the same rule minimize.lua applies (big only onto an empty
+  // workspace), unless a double tap forced it.
+  readonly property bool currentWorkspaceEmpty: {
+    var m = Hyprland.focusedMonitor
+    var ws = m ? m.activeWorkspace : null
+    return !ws || !ws.toplevels || ws.toplevels.values.length === 0
+  }
+  function comesBackFull(entry) {
+    if (!entry) return false
+    if (entry.mode === "full") return true
+    if (entry.mode === "tile") return false
+    return entry.savedBig && root.currentWorkspaceEmpty
+  }
+  // Three-finger double tap while the dock has the keyboard: flip how the
+  // selected tile comes back. Shown at once; Lua stores it on the window.
+  function toggleSelectedFullscreen() {
+    var i = root.selectedIndex
+    if (i < 0 || i >= root.windows.length) return
+    var entry = root.windows[i]
+    var mode = root.comesBackFull(entry) ? "tile" : "full"
+    var next = root.windows.slice()
+    next[i] = Object.assign({}, entry, { mode: mode })
+    root.windows = next
+    Quickshell.execDetached(["hyprctl", "dispatch",
+      "(function() if Minimize and Minimize.set_mode then Minimize.set_mode('" + entry.address + "', '" + mode + "') end return hl.dsp.no_op() end)()"])
+  }
+
+  // Lua needs to know who a three-finger double tap is for.
+  function sendDockFocus() {
+    Quickshell.execDetached(["hyprctl", "dispatch",
+      "(function() if Minimize and Minimize.dock_focus then Minimize.dock_focus(" + (root.focusMode ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
+  }
+  onFocusModeChanged: sendDockFocus()
 
   function setSelected(index) {
     if (index < 0 || index >= root.windows.length) index = -1
@@ -271,6 +328,7 @@ Item {
     else if (cmd === "flyIn") root.startFlight(payload, false, "")
     else if (cmd === "retarget") root.retargetFlight(payload)
     else if (cmd === "endFlight") root.endFlight("")
+    else if (cmd === "doubletap") { if (root.focusMode) root.toggleSelectedFullscreen() }
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -287,6 +345,8 @@ Item {
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
           || name === "configreloaded") refreshTimer.restart()
+      // A reload throws Lua's state away, the dock's keyboard flag included.
+      if (name === "configreloaded") root.sendDockFocus()
     }
   }
 
@@ -613,12 +673,23 @@ Item {
                 }
                 Text {
                   id: title
-                  anchors { left: icon.right; leftMargin: Style.space(6); right: parent.right; rightMargin: Style.space(2); verticalCenter: parent.verticalCenter }
+                  anchors { left: icon.right; leftMargin: Style.space(6); right: fullBadge.visible ? fullBadge.left : parent.right; rightMargin: Style.space(2); verticalCenter: parent.verticalCenter }
                   text: tile.modelData.title
                   color: tile.selected ? Color.foreground : Util.alpha(Color.bar.text, 0.85)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
                   elide: Text.ElideRight
+                  textFormat: Text.PlainText
+                }
+                // Comes back fullscreen (onto this workspace, or forced by a double tap).
+                Text {
+                  id: fullBadge
+                  anchors { right: parent.right; rightMargin: Style.space(2); verticalCenter: parent.verticalCenter }
+                  visible: root.comesBackFull(tile.modelData)
+                  text: "󰊓"
+                  color: tile.modelData.mode !== "" ? Color.accent : Util.alpha(Color.bar.text, 0.75)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
                   textFormat: Text.PlainText
                 }
               }
@@ -1035,6 +1106,8 @@ Item {
     function focused(): string { return root.focusMode ? "true" : "false" }
     function select(delta: int): string { root.moveSelection(delta); return root.selectedAddress }
     function selected(): string { return root.selectedAddress }
+    // Debug: which tiles come back fullscreen onto the workspace on screen, e.g. "0x..:full 0x..:tile".
+    function fullscreenPlan(): string { return root.windows.map(function(w) { return w.address + ":" + (root.comesBackFull(w) ? "full" : "tile") }).join(" ") }
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
     function layout(): string { return String(root.dockGeometry.width) + "x" + String(root.dockGeometry.height) + " at x=" + String(root.dockGeometry.x) }

@@ -42,7 +42,8 @@
       "tray_max": 5,
       "tray_thumbnails": true,
       "tray_reserve_space": false,
-      "focus_blur": false
+      "focus_blur": false,
+      "double_tap_fullscreen": true
     },
     "schema": [
       {
@@ -93,6 +94,13 @@
         "label": "Persistent workspaces",
         "defaultValue": 5,
         "description": "Keep workspaces 1..N alive so a swipe visits each one in order and never creates new ones past N. 0 disables."
+      },
+      {
+        "key": "double_tap_fullscreen",
+        "type": "boolean",
+        "label": "Double tap: fullscreen",
+        "defaultValue": true,
+        "description": "Three-finger double tap toggles fullscreen. In the tray it sets whether the selected tile comes back fullscreen. A single three-finger tap (middle click) arrives 0.3 s late."
       },
       {
         "key": "tray_key",

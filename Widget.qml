@@ -23,7 +23,8 @@ Panel {
   readonly property var defaults: ({
     minimize: true, swipe_distance: 500, swipe_cancel_ratio: 0.12, swipe_min_speed_to_force: 25,
     slide_speed: 4.5, instant_keyboard_switch: true, persistent_workspaces: 5,
-    tray_key: "SUPER + M", tray_max: 5, tray_thumbnails: true, tray_reserve_space: false, focus_blur: false
+    tray_key: "SUPER + M", tray_max: 5, tray_thumbnails: true, tray_reserve_space: false, focus_blur: false,
+    double_tap_fullscreen: true
   })
   readonly property bool minimizeOn: get("minimize") === true
 
@@ -219,6 +220,11 @@ Panel {
             onClicked: root.save({ instant_keyboard_switch: root.get("instant_keyboard_switch") !== true })
           }
           SettingNumber { label: "Persistent workspaces"; from: 0; to: 10; value: Number(root.get("persistent_workspaces")); onCommitted: function(v) { root.save({ persistent_workspaces: v }) } }
+          Toggle {
+            width: parent.width; label: "Double tap: fullscreen"; description: "Three-finger double tap toggles fullscreen (in the tray: how the selected tile comes back). A single three-finger tap arrives 0.3 s late."
+            checked: root.get("double_tap_fullscreen") === true; foreground: root.foreground; fontFamily: root.fontFamily
+            onClicked: root.save({ double_tap_fullscreen: root.get("double_tap_fullscreen") !== true })
+          }
 
           PanelSeparator { foreground: root.foreground }
 

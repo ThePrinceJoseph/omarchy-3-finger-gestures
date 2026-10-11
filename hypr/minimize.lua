@@ -12,6 +12,11 @@
 -- Minimize.restore_latest()  same, always the most recently minimized window.
 -- Minimize.restore_all()     everything at once. Minimize.shutdown() for uninstall.
 --
+-- A window that was maximized or fullscreen comes back that way onto an empty
+-- workspace, and tiles (or floats, if it floated) onto one that already has
+-- windows. Minimize.set_mode(address, "full"|"tile") overrides that for one
+-- window in the dock (the dock's three-finger double tap).
+--
 -- How the animation works: the window itself is never resized. Its picture
 -- is taken (the dock captures the window's buffer), then the dock plugin animates that picture between the
 -- window's rectangle and its tile (`omarchy-shell minimized-tray flyOut/flyIn`)
@@ -40,6 +45,8 @@ M.shutting_down = false             -- set by M.shutdown(); refuses new minimize
 M.thumbnails = M.thumbnails or false -- show the picture in the dock tile (gestures.lua sets it)
 M.thumb_dir = os.getenv("HOME") .. "/.cache/threefinger-tray"
 M.inflight = M.inflight or {} -- address -> what a minimize in progress needs when the dock calls back
+M.arriving = M.arriving or {} -- workspace -> restores started but not yet moved there
+M.dock_focused = M.dock_focused or false -- the dock holds the keyboard (it says so on every change)
 
 -- ------------------------------------------------------------------ helpers
 
@@ -181,9 +188,22 @@ local function clear_state_tag(w)
   if t then tag(w, t, false) end
 end
 
+-- How a window in the dock should come back, if overridden: "full", "tile" or nil.
+local function mode_from_tags(w)
+  if has_tag(w, "min_mode_full") then return "full" end
+  if has_tag(w, "min_mode_tile") then return "tile" end
+  return nil
+end
+
+local function clear_mode_tag(w)
+  if has_tag(w, "min_mode_full") then tag(w, "min_mode_full", false) end
+  if has_tag(w, "min_mode_tile") then tag(w, "min_mode_tile", false) end
+end
+
 -- Drop the flight/hidden tags and the saved-state tag from a window.
 local function clear_transient_tags(w)
   clear_state_tag(w)
+  clear_mode_tag(w)
   if has_tag(w, "min_flying") then tag(w, "min_flying", false) end
   if has_tag(w, "min_hidden") then tag(w, "min_hidden", false) end
 end
@@ -209,6 +229,7 @@ local function recover_stranded()
       if has_tag(w, "min_flying") then tag(w, "min_flying", false) end
       if has_tag(w, "min_hidden") then tag(w, "min_hidden", false) end
       if not (w.workspace and w.workspace.name == M.workspace) then
+        clear_mode_tag(w)
         local s = state_from_tags(w)
         if s then
           -- Put back what the interrupted trip had taken away.
@@ -395,6 +416,19 @@ function M.restore(addr)
   local s = state_from_tags(w) or M.saved[addr] or {}
   local mon = monitor()
   local target = current_workspace()
+  -- Maximized or fullscreen again only onto an empty workspace (counting
+  -- windows already on their way there); else it joins the layout. The
+  -- dock's double tap can force either way.
+  local mode = mode_from_tags(w)
+  local others = #(hl.get_workspace_windows(target) or {}) + (M.arriving[target] or 0)
+  local was_big = s.maximized or s.fullscreen
+  local big_mode = nil
+  if mode == "full" then
+    big_mode = s.maximized and "maximized" or "fullscreen"
+  elseif mode ~= "tile" and was_big and others == 0 then
+    big_mode = s.maximized and "maximized" or "fullscreen"
+  end
+  M.arriving[target] = (M.arriving[target] or 0) + 1
   -- Where the picture flies to: the saved geometry (monitor-relative), fitted
   -- onto the monitor we restore to. A tiled window lands wherever the layout
   -- puts it; the dock is told the real spot as soon as Hyprland knows it.
@@ -404,9 +438,9 @@ function M.restore(addr)
   local ry = s.y or math.floor((mon.h - sh) / 2)
   local ax = mon.x + math.max(0, math.min(rx, mon.w - sw))
   local ay = mon.y + math.max(0, math.min(ry, mon.h - sh))
-  local big = s.maximized or s.fullscreen
+  local big = big_mode ~= nil
   local fx, fy, fw, fh = ax, ay, sw, sh
-  if big then fx, fy, fw, fh = big_rect(s, mon) end
+  if big then fx, fy, fw, fh = big_rect({ fullscreen = big_mode == "fullscreen" }, mon) end
   for i = #M.stack, 1, -1 do
     if M.stack[i] == addr then table.remove(M.stack, i) end
   end
@@ -418,6 +452,7 @@ function M.restore(addr)
   tag(w, "min_hidden", true)
   tag(w, "min_flying", true)
   after(20, function()
+    M.arriving[target] = math.max(0, (M.arriving[target] or 1) - 1)
     local w2 = find(addr)
     if M.op[addr] ~= token or not w2 then return end
     hl.dispatch(hl.dsp.window.move({ window = w2, workspace = target, follow = true }))
@@ -443,7 +478,7 @@ function M.restore(addr)
       after(M.anim_ms - 40, function()
         local w3 = find(addr)
         if M.op[addr] ~= token or not w3 then return end
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w3, action = "set", mode = s.maximized and "maximized" or "fullscreen" }))
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w3, action = "set", mode = big_mode }))
       end)
     end
     after(M.anim_ms, function()
@@ -454,7 +489,7 @@ function M.restore(addr)
       after(80, function()
         if M.op[addr] ~= token then return end
         local w5 = find(addr)
-        if w5 then clear_state_tag(w5) tag(w5, "min_flying", false) end
+        if w5 then clear_state_tag(w5) clear_mode_tag(w5) tag(w5, "min_flying", false) end
         os.remove(thumb_path(addr))
         M.saved[addr] = nil
         M.busy[addr] = nil
@@ -462,6 +497,25 @@ function M.restore(addr)
     end)
   end)
   return true
+end
+
+-- Force how one window in the dock comes back: "full" (maximized or
+-- fullscreen, whatever it was, else fullscreen), "tile", or nil for the
+-- default (big only onto an empty workspace). Stored as a tag, so it
+-- survives a config reload and the dock can read it from the window list.
+function M.set_mode(addr, mode)
+  local w = find(addr)
+  if not (w and w.workspace and w.workspace.name == M.workspace) then return false end
+  clear_mode_tag(w)
+  if mode == "full" or mode == "tile" then tag(w, "min_mode_" .. mode, true) end
+  return true
+end
+
+-- The dock reports when it takes and releases the keyboard, so a three-finger
+-- double tap knows whether it is meant for the dock or for the focused window.
+function M.dock_focus(on)
+  M.dock_focused = on and true or false
+  return M.dock_focused
 end
 
 -- Hyprland reuses window addresses, so drop what we remember about a window
