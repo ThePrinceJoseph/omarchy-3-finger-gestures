@@ -11,6 +11,8 @@
 --                            recently minimized window.
 -- Minimize.restore_latest()  same, always the most recently minimized window.
 -- Minimize.restore_all()     everything at once. Minimize.shutdown() for uninstall.
+-- Minimize.close_swipe()     three fingers up while the dock is idle: prompt to
+--                            close the focused window; a quick second swipe closes.
 --
 -- A window that was maximized or fullscreen comes back maximized (the top bar
 -- stays visible) onto an empty workspace, and tiles (or floats, if it
@@ -119,6 +121,15 @@ local function rect_json(addr, x, y, w, h, mon, extra)
   return string.format('{"address":"%s","x":%d,"y":%d,"w":%d,"h":%d,"monitor":"%s","mx":%d,"my":%d%s}',
     addr, math.floor(x), math.floor(y), math.floor(w), math.floor(h),
     mon and mon.name or "", mon and mon.x or 0, mon and mon.y or 0, extra or "")
+end
+
+local function json_string(v)
+  local str = tostring(v or "")
+  str = str:gsub('[%c"\\]', function(c)
+    if c == '"' then return '\\"' elseif c == "\\" then return "\\\\" end
+    return string.format("\\u%04x", c:byte())
+  end)
+  return '"' .. str .. '"'
 end
 
 -- Talk to the dock plugin through Hyprland's own event socket: the `event`
@@ -519,7 +530,10 @@ end
 -- Hyprland reuses window addresses, so drop what we remember about a window
 -- as soon as it closes (e.g. closed from the dock while minimized).
 hl.on("window.close", function(w)
-  if w and w.address then forget(w.address) end
+  if w and w.address then
+    forget(w.address)
+    if M.prompt and M.prompt.addr == w.address then M.cancel_prompt() end
+  end
 end)
 
 function M.restore_latest()
@@ -596,10 +610,19 @@ hl.window_rule({ match = { tag = "min_hidden" }, opacity = "0 override", no_anim
 -- it is switched on only while the scrim is up and the user's own blur
 -- settings are put back afterwards.
 M.scrim_blur = { size = 1, passes = 1 }  -- light: text behind stays legible
+M.prompt_blur = { size = 8, passes = 3 } -- the window about to close: unreadable
 M.saved_blur = M.saved_blur or nil
+M.blur_users = M.blur_users or {}     -- who needs blur on now -> { size, passes }
 
-function M.scrim(on)
-  if on then
+-- Switch blur on for whoever needs it (the strongest request wins) and put
+-- the user's own settings back when nobody does.
+local function set_blur(who, params)
+  M.blur_users[who] = params
+  local want = nil
+  for _, b in pairs(M.blur_users) do
+    if not want or b.size * b.passes > want.size * want.passes then want = b end
+  end
+  if want then
     if not M.saved_blur then
       M.saved_blur = {
         enabled = hl.get_config("decoration.blur.enabled"),
@@ -607,7 +630,7 @@ function M.scrim(on)
         passes = hl.get_config("decoration.blur.passes"),
       }
     end
-    hl.config({ decoration = { blur = { enabled = true, size = M.scrim_blur.size, passes = M.scrim_blur.passes } } })
+    hl.config({ decoration = { blur = { enabled = true, size = want.size, passes = want.passes } } })
   elseif M.saved_blur then
     local b = M.saved_blur
     M.saved_blur = nil
@@ -615,7 +638,84 @@ function M.scrim(on)
   end
 end
 
+function M.scrim(on)
+  set_blur("scrim", on and M.scrim_blur or nil)
+end
+
+-- ------------------------------------------------------------------- close
+
+-- Three fingers up while the dock does not hold the keyboard: close the
+-- focused window, after a prompt the dock draws over it (the window blurred
+-- behind it). A quick second swipe up closes, whether or not the prompt is
+-- up yet, so a quick double swipe closes without waiting for it; so does a
+-- click on the prompt. Three fingers down, a workspace switch or
+-- M.prompt_ms of nothing puts it away.
+M.prompt_ms = 3000
+M.double_swipe_ms = 800
+M.prompt = nil          -- { addr, token } while the prompt is up
+M.recent_up = nil       -- { addr, token } for M.double_swipe_ms after a swipe up
+local prompt_tokens = 0
+
+local function hide_prompt()
+  if not M.prompt then return end
+  M.prompt = nil
+  tray("closePromptHide")
+  set_blur("prompt", nil)
+end
+
+function M.close_window(addr)
+  hide_prompt()
+  M.recent_up = nil
+  local w = find(addr)
+  if w then hl.dispatch(hl.dsp.window.close({ window = w })) end
+end
+
+function M.close_swipe()
+  local w = hl.get_active_window()
+  if not w or (w.workspace and w.workspace.name == M.workspace) then return false end
+  local addr = w.address
+  if M.recent_up and M.recent_up.addr == addr then
+    M.close_window(addr)
+    return true
+  end
+  prompt_tokens = prompt_tokens + 1
+  local token = prompt_tokens
+  M.recent_up = { addr = addr, token = token }
+  after(M.double_swipe_ms, function()
+    if M.recent_up and M.recent_up.token == token then M.recent_up = nil end
+  end)
+  local ax, ay = vec(w.at)
+  local sw, sh = vec(w.size)
+  local mon = monitor(w.monitor)
+  M.prompt = { addr = addr, token = token }
+  set_blur("prompt", M.prompt_blur)
+  tray("closePrompt", rect_json(addr, ax, ay, sw, sh, mon, ',"title":' .. json_string(w.title ~= "" and w.title or w.class)))
+  after(M.prompt_ms, function()
+    if M.prompt and M.prompt.token == token then hide_prompt() end
+  end)
+  return true
+end
+
+-- Three fingers down while the prompt is up cancels it (and minimizes
+-- nothing). Returns true if there was a prompt to put away.
+function M.cancel_prompt()
+  if not M.prompt then return false end
+  M.recent_up = nil
+  hide_prompt()
+  return true
+end
+
+-- The dock calls these when the prompt is clicked.
+function M.prompt_clicked(confirm)
+  if not M.prompt then return false end
+  if confirm then M.close_window(M.prompt.addr) else M.cancel_prompt() end
+  return true
+end
+
+hl.on("workspace.active", function() M.cancel_prompt() end)
+
 hl.layer_rule({ match = { namespace = "omarchy-minimized-scrim" }, blur = true, animation = "fade" })
+hl.layer_rule({ match = { namespace = "omarchy-close-prompt" }, blur = true, animation = "fade" })
 
 -- The dock slides up from the bottom edge when it appears and back down when
 -- it goes.

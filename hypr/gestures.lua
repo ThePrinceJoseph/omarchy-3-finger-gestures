@@ -4,7 +4,9 @@
 -- Three-finger touchpad gestures for Omarchy 4 (Hyprland 0.56, Lua config):
 --   left / right  change workspace, gliding with your fingers
 --   down          minimize the focused window into a tray at the bottom
---   up            bring the selected minimized window back (see minimize.lua)
+--   up            while the tray has the keyboard: bring the selected minimized
+--                 window back; otherwise: offer to close the focused window
+--                 (a quick double swipe up closes it)
 --   double tap    maximize the focused window or put it back (the top bar stays
 --                 visible); while the tray has the keyboard, whether the
 --                 selected tile comes back maximized
@@ -113,8 +115,15 @@ elseif opt.minimize and Minimize then
       tonumber(opt.swipe_min_speed_to_force) or 25, scroll_factor))
     f:close()
   end
-  hl.gesture({ fingers = 3, direction = "down", action = function() Minimize.minimize() end })
-  hl.gesture({ fingers = 3, direction = "up", action = function() Minimize.restore_selected() end })
+  -- Down minimizes, or puts away a close prompt. Up brings the selected tile
+  -- back while the tray has the keyboard; otherwise it offers to close the
+  -- focused window (a quick double swipe up closes it).
+  hl.gesture({ fingers = 3, direction = "down", action = function()
+    if not Minimize.cancel_prompt() then Minimize.minimize() end
+  end })
+  hl.gesture({ fingers = 3, direction = "up", action = function()
+    if Minimize.dock_focused then Minimize.restore_selected() else Minimize.close_swipe() end
+  end })
   if opt.tray_key and opt.tray_key ~= "" and opt.tray_key ~= "none" then
     o.bind(opt.tray_key, "Minimized tray: toggle keyboard", "omarchy-shell minimized-tray focus")
   end

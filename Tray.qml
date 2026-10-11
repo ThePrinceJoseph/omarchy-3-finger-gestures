@@ -21,8 +21,10 @@ import qs.Commons
 // Backspace/Delete closes. Escape, Down, the tray key or a click outside the
 // dock hand the keyboard back; restoring a tile, emptying the dock or
 // switching workspace does too.
-// The selected tile is what a three-finger swipe up brings back (its address
-// is written to `selectedPath`, which minimize.lua reads).
+// While the dock has the keyboard, the selected tile is what a three-finger
+// swipe up brings back (its address is written to `selectedPath`, which
+// minimize.lua reads). With the dock idle, three fingers up offers to close
+// the focused window instead (the close prompt, further down).
 
 Item {
   id: root
@@ -336,6 +338,8 @@ Item {
     else if (cmd === "retarget") root.retargetFlight(payload)
     else if (cmd === "endFlight") root.endFlight("")
     else if (cmd === "doubletap") { if (root.focusMode) root.toggleSelectedFullscreen() }
+    else if (cmd === "closePrompt") root.showClosePrompt(payload)
+    else if (cmd === "closePromptHide") root.closePrompt = null
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -757,6 +761,108 @@ Item {
     }
   }
 
+  // Close prompt: three fingers up while the dock is idle offers to close the
+  // focused window (minimize.lua decides; see Minimize.close_swipe). A
+  // surface exactly over the window, on a layer Hyprland blurs behind, so the
+  // window it is about to close shows through blurred, with a card on top.
+  // Clicking the card closes; clicking the blurred window around it cancels.
+  property var closePrompt: null   // { address, title, screenName, x, y, w, h } (screen-local)
+  function showClosePrompt(payload) {
+    var p
+    try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad prompt payload: " + e); return }
+    var scr = p.monitor ? root.screenNamed(String(p.monitor)) : root.focusedScreen()
+    root.closePrompt = {
+      address: String(p.address || ""), title: String(p.title || ""),
+      screenName: scr ? scr.name : "",
+      x: (Number(p.x) || 0) - (Number(p.mx) || 0), y: (Number(p.y) || 0) - (Number(p.my) || 0),
+      w: Math.max(1, Number(p.w) || 1), h: Math.max(1, Number(p.h) || 1)
+    }
+  }
+  function answerClosePrompt(confirm) {
+    root.closePrompt = null
+    Quickshell.execDetached(["hyprctl", "dispatch",
+      "(function() if Minimize and Minimize.prompt_clicked then Minimize.prompt_clicked(" + (confirm ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
+  }
+
+  Variants {
+    model: Quickshell.screens
+
+    PanelWindow {
+      id: promptWindow
+      required property var modelData
+      screen: modelData
+      readonly property var p: root.closePrompt
+      visible: p !== null && p.screenName === (promptWindow.screen ? promptWindow.screen.name : "")
+      anchors { top: true; left: true }
+      margins { left: p ? p.x : 0; top: p ? p.y : 0 }
+      implicitWidth: p ? p.w : 1
+      implicitHeight: p ? p.h : 1
+      color: Qt.rgba(0, 0, 0, 0.22)
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.namespace: "omarchy-close-prompt"
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+      // Anywhere on the blurred window but the card: cancel.
+      MouseArea { anchors.fill: parent; onClicked: root.answerClosePrompt(false) }
+
+      Rectangle {
+        id: promptCard
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 2 * root.pad, Math.max(promptText.implicitWidth, promptHint.implicitWidth, promptTitle.implicitWidth) + 4 * root.pad)
+        height: promptColumn.implicitHeight + 3 * root.pad
+        radius: Style.cornerRadius > 0 ? Style.space(12) : 0
+        color: cardMouse.containsMouse ? Util.alpha(Color.urgent, 0.92) : Util.alpha(Color.popups.background, 0.94)
+        border.width: 1
+        border.color: Util.alpha(Color.urgent, 0.7)
+        Behavior on color { ColorAnimation { duration: 120 } }
+        scale: promptWindow.visible ? 1 : 0.94
+        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+        Column {
+          id: promptColumn
+          anchors.centerIn: parent
+          width: parent.width - 2 * root.pad
+          spacing: Style.space(6)
+          Text {
+            id: promptTitle
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: promptWindow.p ? promptWindow.p.title : ""
+            color: Util.alpha(Color.foreground, 0.75)
+            font.family: Style.font.family; font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideMiddle; textFormat: Text.PlainText
+          }
+          Text {
+            id: promptText
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: "Swipe up twice quickly to close"
+            color: Color.foreground
+            font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true
+            textFormat: Text.PlainText
+          }
+          Text {
+            id: promptHint
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: "Click to close · three fingers down to cancel"
+            color: Util.alpha(Color.foreground, 0.75)
+            font.family: Style.font.family; font.pixelSize: Style.font.bodySmall
+            textFormat: Text.PlainText
+          }
+        }
+        MouseArea {
+          id: cardMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.answerClosePrompt(true)
+        }
+      }
+    }
+  }
+
   // Larger preview right above the hovered tile: the full title and a bigger
   // picture. Drawn on a full-screen transparent surface so it can be placed
   // by exact coordinates; fades in and out.
@@ -1114,6 +1220,7 @@ Item {
     function select(delta: int): string { root.moveSelection(delta); return root.selectedAddress }
     function selected(): string { return root.selectedAddress }
     // Debug: which tiles come back fullscreen onto the workspace on screen, e.g. "0x..:full 0x..:tile".
+    function prompt(): string { return root.closePrompt ? JSON.stringify(root.closePrompt) : "" }
     function fullscreenPlan(): string { return root.windows.map(function(w) { return w.address + ":" + (root.comesBackFull(w) ? "full" : "tile") }).join(" ") }
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }

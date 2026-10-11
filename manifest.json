@@ -5,7 +5,7 @@
   "version": "2.0.0",
   "author": "Joey Morrison",
   "license": "MIT",
-  "description": "Three-finger touchpad gestures for Omarchy: swipe sideways to change workspace, swipe down to minimize a window into a bottom tray, swipe up to bring it back. Settings live in the bar.",
+  "description": "Three-finger touchpad gestures for Omarchy: swipe sideways to change workspace, swipe down to minimize a window into a bottom tray, swipe up to bring it back (or, with the tray idle, to close the focused window). Settings live in the bar.",
   "kinds": [
     "bar-widget",
     "panel"

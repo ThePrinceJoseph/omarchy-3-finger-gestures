@@ -6,8 +6,8 @@ Omarchy shell plugin:
 | Gesture | What happens |
 |---|---|
 | **Three fingers left / right** | Change workspace. The screen follows your fingers and glides into place when you let go. |
-| **Three fingers down** | *Minimize* the focused window: it shrinks down into a tray along the bottom of the screen. |
-| **Three fingers up** | Bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. |
+| **Three fingers down** | *Minimize* the focused window: it shrinks down into a tray along the bottom of the screen. While a close prompt is up, cancel it instead. |
+| **Three fingers up** | While the tray has the keyboard: bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. Otherwise: offer to close the focused window. The window blurs behind a prompt; a quick second swipe up or a click on the prompt closes it, three fingers down or 3 seconds cancels. A quick double swipe up closes without waiting. |
 | **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile, stopping at the ends. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
 | **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. The tray keeps the keyboard while tiles remain, so you can bring back the next one. |
 | **Three-finger double tap** | Maximize the focused window, or put a maximized or fullscreen one back. The top bar stays visible. While the tray has the keyboard: flip whether the selected tile comes back maximized (a 󰊓 on the tile shows it will). |
@@ -134,6 +134,12 @@ Omarchy's window animation speed.
   trackpoint middle button is untouched). A single tap is held for 0.3 s to see if a
   second follows, then handed on as the middle click it was. Turn
   `double_tap_fullscreen` off to get instant three-finger middle clicks back.
+- **Closing with three fingers up** only happens when the tray does not have the keyboard,
+  so swipe down, then up, still brings a window straight back. To bring one back later,
+  press SUPER+M first (or click its tile). The prompt blurs the window by switching
+  Hyprland's blur on for a moment (Omarchy keeps it off), so slightly see-through windows
+  elsewhere blur too while it is up; your blur settings are put back as it goes. Apps
+  that ask before closing (unsaved work) still ask.
 - **Two fingers up keeps the tray's keyboard** while tiles remain, so the window it
   brought back gets the keyboard once you are done with the tray (Escape, a click, a
   workspace switch, or the last tile).

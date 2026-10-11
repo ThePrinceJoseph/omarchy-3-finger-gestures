@@ -44,7 +44,8 @@ cat <<MSG
 Done. Try it:
   three fingers left/right   change workspace
   three fingers down         minimize the focused window into the bottom tray
-  three fingers up           bring the selected tile back
+  three fingers up           tray open: bring the selected tile back
+                             otherwise: close the focused window (swipe twice quickly)
   two fingers left/right     while the tray has the keyboard: pick a tile
   SUPER+M                    hand the keyboard to the tray / take it back
 
