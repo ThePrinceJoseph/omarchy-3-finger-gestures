@@ -15,7 +15,8 @@ import qs.Commons
 // Selection: hovering selects. The dock takes the keyboard as soon as a tile
 // lands (and on the tray key), so Left/Right (or Tab) move the selection,
 // Enter/Up restores, Backspace/Delete closes. Escape, Down or the tray key
-// hand the keyboard back; restoring a tile or emptying the dock does too.
+// hand the keyboard back; restoring a tile, emptying the dock or switching
+// workspace does too.
 // The selected tile is what a three-finger swipe up brings back (its address
 // is written to `selectedPath`, which minimize.lua reads).
 
@@ -260,6 +261,10 @@ Item {
       if (!event || !event.name) return
       var name = String(event.name)
       if (name === "custom") { root.handleCustom(event.data); return }
+      // A workspace or monitor switch means the user has moved on: hand the
+      // keyboard back. While the dock holds it, Hyprland focuses no window on
+      // the new workspace, and the next swipe down would find nothing to take.
+      if (name === "workspace" || name === "workspacev2" || name === "focusedmon" || name === "focusedmonv2") { root.focusMode = false; return }
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
           || name === "configreloaded") refreshTimer.restart()

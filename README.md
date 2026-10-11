@@ -14,8 +14,8 @@ and title) and only exists while something is minimized. Hover a tile for a ✕ 
 larger preview with the full title. Hover a tile to select
 it, click it to bring it back. When a tile lands, the tray takes the keyboard:
 **Left / Right** pick a tile, **Enter** brings it back, **Backspace** closes it,
-**Escape** (or Down, or SUPER+M) hands the keyboard back. **SUPER+M** hands it to the
-tray again later. It holds five windows by default (up to twelve): the idea is a quick
+**Escape** (or Down, SUPER+M, or switching workspace) hands the keyboard back. **SUPER+M**
+hands it to the tray again later. It holds five windows by default (up to twelve): the idea is a quick
 way to carry a few windows to another workspace, not a window list.
 
 Hyprland has no real "minimize", so the tray is backed by a hidden special workspace
@@ -85,7 +85,7 @@ Omarchy's window animation speed.
 ## Good to know
 
 - **The dock takes the keyboard on purpose.** Right after a swipe down, typing goes to
-  the dock until you press Escape. Turn on `focus_blur` to make that obvious: everything
+  the dock until you press Escape or switch workspace. Turn on `focus_blur` to make that obvious: everything
   else on screen is lightly blurred and dimmed while the dock holds the keyboard; a workspace with no windows stays clear, since
   that is where the tiles are headed. Omarchy keeps blur off globally, so it is switched
   on only for that moment and your own blur settings are put back afterwards (strength:

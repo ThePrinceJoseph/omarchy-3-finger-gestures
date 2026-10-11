@@ -238,9 +238,38 @@ end
 
 -- ----------------------------------------------------------------- minimize
 
+-- The window a swipe down takes: the focused one, as long as it really is on
+-- the workspace being looked at. While the dock holds the keyboard Hyprland
+-- hands focus to no window, so after a workspace switch the "active" window
+-- can still be the one just minimized, or one left on another workspace. Then
+-- take the window under the cursor on the workspace that is on screen, else
+-- that workspace's last focused window.
+local function target_window()
+  local w = hl.get_active_window()
+  local mon = hl.get_monitor_at_cursor() or hl.get_active_monitor()
+  local ws = mon and mon.active_workspace or hl.get_active_workspace()
+  if not ws then return w end
+  local shown = { [ws.id] = true }
+  local ok, special = pcall(hl.get_active_special_workspace)
+  if ok and special and special.name ~= M.workspace then shown[special.id] = true end
+  if w and w.workspace and shown[w.workspace.id] then return w end
+  local wins = hl.get_workspace_windows(tostring(ws.id)) or {}
+  local cx, cy = vec(hl.get_cursor_pos())
+  local under
+  for _, c in ipairs(wins) do
+    local x, y = vec(c.at)
+    local cw, ch = vec(c.size)
+    if cx >= x and cx < x + cw and cy >= y and cy < y + ch then
+      -- A floating window sits above the tiles, a fullscreen one above all.
+      if not under or (c.fullscreen or 0) > (under.fullscreen or 0) or (c.floating and not under.floating) then under = c end
+    end
+  end
+  return under or ws.last_window or wins[1]
+end
+
 function M.minimize(w)
   if M.shutting_down then return false end
-  w = w or hl.get_active_window()
+  w = w or target_window()
   if not w then return false end
   if w.workspace and w.workspace.name == M.workspace then return false end
   local addr = w.address
