@@ -45,6 +45,7 @@ Done. Try it:
   three fingers left/right   change workspace
   three fingers down         minimize the focused window into the bottom tray
   three fingers up           bring the selected tile back
+  two fingers left/right     while the tray has the keyboard: pick a tile
   SUPER+M                    hand the keyboard to the tray / take it back
 
 Settings: click the 󱂬 icon in the bar, or: omarchy bar set $id <key> <value>

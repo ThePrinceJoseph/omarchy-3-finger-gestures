@@ -13,7 +13,8 @@ import qs.Commons
 // dot; hovering shows a larger preview above the dock and a ✕ to close.
 //
 // Selection: hovering selects. The dock takes the keyboard as soon as a tile
-// lands (and on the tray key), so Left/Right (or Tab) move the selection,
+// lands (and on the tray key), so Left/Right (or Tab, or a two-finger swipe
+// left/right on the touchpad, see Minimize.dock_focus) move the selection,
 // Enter/Up restores, Backspace/Delete closes. Escape, Down or the tray key
 // hand the keyboard back; restoring a tile, emptying the dock or switching
 // workspace does too.
@@ -252,6 +253,7 @@ Item {
     else if (cmd === "flyIn") root.startFlight(payload, false, "")
     else if (cmd === "retarget") root.retargetFlight(payload)
     else if (cmd === "endFlight") root.endFlight("")
+    else if (cmd === "select") root.moveSelection(parseInt(payload) || 0)
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -268,8 +270,18 @@ Item {
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
           || name === "configreloaded") refreshTimer.restart()
+      // A reload throws Lua's state away, scroll binds included.
+      if (name === "configreloaded" && root.focusMode) root.sendDockFocus()
     }
   }
+
+  // Two-finger swipes move the highlight only while the dock holds the
+  // keyboard: Lua binds the horizontal scroll for just that time.
+  function sendDockFocus() {
+    Quickshell.execDetached(["hyprctl", "dispatch",
+      "(function() if Minimize and Minimize.dock_focus then Minimize.dock_focus(" + (root.focusMode ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
+  }
+  onFocusModeChanged: sendDockFocus()
 
   Component.onCompleted: refresh()
 

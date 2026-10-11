@@ -464,6 +464,40 @@ function M.restore(addr)
   return true
 end
 
+-- ------------------------------------------------------ two-finger select
+
+-- While the dock holds the keyboard, a two-finger swipe left or right on the
+-- touchpad (a horizontal scroll, as far as Hyprland is concerned) moves the
+-- highlight. The scroll binds exist only for that time, so horizontal
+-- scrolling in apps is untouched otherwise. The dock calls
+-- Minimize.dock_focus(true/false) as it takes and releases the keyboard.
+-- Hyprland already spaces scroll binds out (binds:scroll_event_delay), so a
+-- long swipe walks the tiles one by one.
+M.swipe_bound = M.swipe_bound or false
+
+local function swipe_select(dir)
+  return function()
+    -- Hyprland names the bind after the scroll direction; with natural
+    -- scrolling the axis is flipped, and the highlight should follow the fingers.
+    local natural = hl.get_config("input.touchpad.natural_scroll")
+    if natural == true or natural == 1 then dir = -dir end
+    tray("select", tostring(dir))
+  end
+end
+
+function M.dock_focus(on)
+  if on and not M.swipe_bound then
+    hl.bind("mouse_left", swipe_select(-1), { description = "Minimized tray: previous tile (two-finger swipe)" })
+    hl.bind("mouse_right", swipe_select(1), { description = "Minimized tray: next tile (two-finger swipe)" })
+    M.swipe_bound = true
+  elseif not on and M.swipe_bound then
+    hl.unbind("mouse_left")
+    hl.unbind("mouse_right")
+    M.swipe_bound = false
+  end
+  return M.swipe_bound
+end
+
 -- Hyprland reuses window addresses, so drop what we remember about a window
 -- as soon as it closes (e.g. closed from the dock while minimized).
 hl.on("window.close", function(w)
