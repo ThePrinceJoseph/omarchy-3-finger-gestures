@@ -8,13 +8,14 @@ Omarchy shell plugin:
 | **Three fingers left / right** | Change workspace. The screen follows your fingers and glides into place when you let go. |
 | **Three fingers down** | *Minimize* the focused window: it shrinks down into a tray along the bottom of the screen. |
 | **Three fingers up** | Bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. |
-| **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
+| **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile, stopping at the ends. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
+| **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. |
 
 The dock shows one tile per minimized window (a picture of the window, its app icon
 and title) and only exists while something is minimized. Hover a tile for a ✕ and a
 larger preview with the full title. Hover a tile to select
 it, click it to bring it back. When a tile lands, the tray takes the keyboard:
-**Left / Right** (or a **two-finger swipe** left or right) pick a tile, **Enter** brings it back, **Backspace** closes it,
+**Left / Right** (or a **two-finger swipe** left or right) pick a tile, **Enter** (or two fingers up) brings it back, **Backspace** closes it,
 **Escape** (or Down, SUPER+M, a click outside the tray, or switching workspace) hands the
 keyboard back. **SUPER+M** hands it to the tray again later. It holds five windows by default (up to twelve): the idea is a quick
 way to carry a few windows to another workspace, not a window list.
