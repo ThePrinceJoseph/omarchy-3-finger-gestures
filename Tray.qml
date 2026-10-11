@@ -184,6 +184,7 @@ Item {
     // pick; if it went away, fall back to the newest tile.
     var wanted = newest || root.selectedAddress
     root.windows = next
+    if (root.hoverIndex >= next.length) root.hoverIndex = -1
     var index = -1
     for (var j = 0; j < next.length; j++) if (next[j].address === wanted) index = j
     root.setSelected(index >= 0 ? index : next.length - 1)
@@ -243,6 +244,12 @@ Item {
       "(function() if Minimize and Minimize.dock_focus then Minimize.dock_focus(" + (root.focusMode ? "true" : "false") + ") end return hl.dsp.no_op() end)()"])
   }
   onFocusModeChanged: sendDockFocus()
+  function resyncLua() {
+    root.closePrompt = null
+    root.sendDockFocus()
+    if (root.scrimAnywhere) Quickshell.execDetached(["hyprctl", "dispatch",
+      "(function() if Minimize and Minimize.scrim then Minimize.scrim(true) end return hl.dsp.no_op() end)()"])
+  }
 
   function setSelected(index) {
     if (index < 0 || index >= root.windows.length) index = -1
@@ -351,8 +358,9 @@ Item {
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
           || name === "configreloaded") refreshTimer.restart()
-      // A reload throws Lua's state away, the dock's keyboard flag included.
-      if (name === "configreloaded") root.sendDockFocus()
+      // A reload throws Lua's state away: its keyboard flag, its blur request
+      // and any close prompt (its timers are gone, so it would never be hidden).
+      if (name === "configreloaded") root.resyncLua()
     }
   }
 

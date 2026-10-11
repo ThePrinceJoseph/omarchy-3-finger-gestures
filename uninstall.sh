@@ -11,11 +11,15 @@ hyprctl dispatch "(function()
     hl.dispatch(hl.dsp.window.move({ window = w, workspace = '+0', follow = false }))
     hl.dispatch(hl.dsp.window.float({ window = w, action = 'disable' }))
   end
+  for _, w in ipairs(hl.get_workspace_windows('special:closed')) do
+    hl.dispatch(hl.dsp.window.move({ window = w, workspace = '+0', follow = false }))
+    hl.dispatch(hl.dsp.window.close({ window = w }))
+  end
   return hl.dsp.no_op()
 end)()" >/dev/null 2>&1 || true
-# Wait until the hidden workspace is really empty (flights in progress finish first).
+# Wait until the hidden workspaces are really empty (flights in progress finish first).
 for _ in $(seq 1 40); do
-  left=$(hyprctl clients -j 2>/dev/null | grep -c '"name": "special:minimized"' || true)
+  left=$(hyprctl clients -j 2>/dev/null | grep -c '"name": "special:minimized"\|"name": "special:closed"' || true)
   [[ "${left:-0}" -eq 0 ]] && break
   sleep 0.1
 done

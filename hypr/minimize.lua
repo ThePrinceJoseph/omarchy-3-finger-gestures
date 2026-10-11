@@ -321,7 +321,7 @@ function M.minimize(w)
 
   local ax, ay = vec(w.at)
   local sw, sh = vec(w.size)
-  local mon = monitor()
+  local mon = monitor(w.monitor)
   -- Geometry is kept relative to the monitor, so the picture can fly back
   -- onto whichever monitor is active at the time.
   local state = {
@@ -631,7 +631,7 @@ function M.undo_close()
   local w = addr and find(addr)
   if not (w and w.workspace and w.workspace.name == M.closed_ws) then
     M.held = nil
-    notify("Nothing to undo", "Only the last window closed with a gesture or from the tray comes back, for 30 seconds.")
+    notify("Nothing to undo", string.format("Only the last window closed with a gesture or from the tray comes back, for %d seconds.", math.floor(M.hold_ms / 1000)))
     return false
   end
   local mode = M.held.mode
@@ -727,6 +727,17 @@ end
 -- then make sure no window is left hidden or tagged.
 function M.shutdown()
   M.shutting_down = true
+  M.cancel_prompt()
+  -- A window waiting for undo: close it for real. Bring it on screen first,
+  -- so if it asks about unsaved work it is there to ask (the follow-up timer
+  -- in really_close may not survive the reload that uninstall does next).
+  M.held = nil
+  for _, w in ipairs(hl.get_workspace_windows(M.closed_ws) or {}) do
+    clear_closed_tags(w)
+    if has_tag(w, "min_flying") then tag(w, "min_flying", false) end
+    hl.dispatch(hl.dsp.window.move({ window = w, workspace = current_workspace(), follow = false }))
+    hl.dispatch(hl.dsp.window.close({ window = w }))
+  end
   local rounds = 0
   local function sweep()
     rounds = rounds + 1
@@ -797,7 +808,7 @@ end
 -- only shakes it. Three fingers down, a workspace switch or M.prompt_ms of
 -- nothing puts it away.
 M.prompt_ms = 3000
-M.double_swipe_ms = 700
+M.double_swipe_ms = 350  -- a second swipe within this closes; the prompt shows after it
 M.prompt = nil          -- { addr, token } while the prompt is up
 M.pending_prompt = nil  -- { addr, token } while a first swipe waits to become a prompt
 M.recent_up = nil       -- { addr, token } for M.double_swipe_ms after a swipe on the prompt
@@ -858,7 +869,8 @@ function M.close_swipe()
     if not (M.pending_prompt and M.pending_prompt.token == token) then return end
     M.pending_prompt = nil
     local w2 = find(addr)
-    if not w2 then return end
+    -- Gone, or off to the dock or the undo workspace meanwhile: nothing to ask.
+    if not w2 or (w2.workspace and tostring(w2.workspace.name):match("^special:")) then return end
     local ax, ay = vec(w2.at)
     local sw, sh = vec(w2.size)
     local mon = monitor(w2.monitor)
