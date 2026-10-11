@@ -98,9 +98,9 @@
       {
         "key": "double_tap_fullscreen",
         "type": "boolean",
-        "label": "Double tap: fullscreen",
+        "label": "Double tap: maximize",
         "defaultValue": true,
-        "description": "Three-finger double tap toggles fullscreen. In the tray it sets whether the selected tile comes back fullscreen. A single three-finger tap (middle click) arrives 0.3 s late."
+        "description": "Three-finger double tap maximizes the focused window or puts it back; the top bar stays visible. In the tray it sets whether the selected tile comes back maximized. A single three-finger tap (middle click) arrives 0.3 s late."
       },
       {
         "key": "tray_key",

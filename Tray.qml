@@ -15,8 +15,9 @@ import qs.Commons
 // Selection: hovering selects. The dock takes the keyboard as soon as a tile
 // lands (and on the tray key), so Left/Right (or Tab, or a two-finger swipe
 // left/right anywhere on the screen) move the selection, Enter/Up (or two
-// fingers up) restores, a three-finger double tap flips whether the selected
-// tile comes back fullscreen (󰊓 on the tile),
+// fingers up, which keeps the keyboard for the next tile) restores, a
+// three-finger double tap flips whether the selected tile comes back
+// maximized (󰊓 on the tile),
 // Backspace/Delete closes. Escape, Down, the tray key or a click outside the
 // dock hand the keyboard back; restoring a tile, emptying the dock or
 // switching workspace does too.
@@ -182,7 +183,8 @@ Item {
     for (var j = 0; j < next.length; j++) if (next[j].address === wanted) index = j
     root.setSelected(index >= 0 ? index : next.length - 1)
     if (root.previewIndex >= next.length) root.previewIndex = -1
-    if (next.length === 0 || restored) root.focusMode = false
+    if (next.length === 0 || (restored && !root.keepFocusAfterRestore)) root.focusMode = false
+    if (restored) root.keepFocusAfterRestore = false
     else if (newest) root.focusMode = true
   }
 
@@ -203,9 +205,9 @@ Item {
     return ""
   }
 
-  // Whether a tile would come back maximized/fullscreen onto the workspace on
-  // screen now: the same rule minimize.lua applies (big only onto an empty
-  // workspace), unless a double tap forced it.
+  // Whether a tile would come back maximized onto the workspace on screen
+  // now: the same rule minimize.lua applies (only onto an empty workspace),
+  // unless a double tap forced it.
   readonly property bool currentWorkspaceEmpty: {
     var m = Hyprland.focusedMonitor
     var ws = m ? m.activeWorkspace : null
@@ -263,9 +265,14 @@ Item {
     clientsProc.running = true
   }
 
-  function restore(address) {
+  // keepKeyboard: a two-finger swipe up keeps the keyboard while tiles remain,
+  // so the next swipe can bring another one back.
+  property bool keepFocusAfterRestore: false
+  Timer { id: keepFocusReset; interval: 2000; onTriggered: root.keepFocusAfterRestore = false }
+  function restore(address, keepKeyboard) {
     if (!address) return
-    root.focusMode = false
+    if (keepKeyboard && root.windows.length > 1) { root.keepFocusAfterRestore = true; keepFocusReset.restart() }
+    else root.focusMode = false
     root.previewIndex = -1
     // hyprctl dispatch wants a dispatcher back, so wrap the call.
     Quickshell.execDetached(["hyprctl", "dispatch",
@@ -422,7 +429,7 @@ Item {
       // Positive y is a scroll up: the fingers moving down with natural
       // scrolling, up without it.
       var up = root.naturalScroll ? root.swipeY < 0 : root.swipeY > 0
-      if (up) root.restore(root.selectedAddress)
+      if (up) root.restore(root.selectedAddress, true)
     }
   }
   // One two-finger scroll event: <dx>, <dy> touchpad units (Qt's signs).
@@ -681,7 +688,7 @@ Item {
                   elide: Text.ElideRight
                   textFormat: Text.PlainText
                 }
-                // Comes back fullscreen (onto this workspace, or forced by a double tap).
+                // Comes back maximized (onto this workspace, or forced by a double tap).
                 Text {
                   id: fullBadge
                   anchors { right: parent.right; rightMargin: Style.space(2); verticalCenter: parent.verticalCenter }

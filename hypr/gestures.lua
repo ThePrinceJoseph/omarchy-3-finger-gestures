@@ -5,8 +5,9 @@
 --   left / right  change workspace, gliding with your fingers
 --   down          minimize the focused window into a tray at the bottom
 --   up            bring the selected minimized window back (see minimize.lua)
---   double tap    toggle fullscreen on the focused window; while the tray has
---                 the keyboard, whether the selected tile comes back fullscreen
+--   double tap    maximize the focused window or put it back (the top bar stays
+--                 visible); while the tray has the keyboard, whether the
+--                 selected tile comes back maximized
 --
 -- Settings come from the bar widget (or `omarchy bar set threefinger.gestures
 -- <key> <value>`), which writes ~/.config/hypr/gestures-settings.lua through
@@ -26,7 +27,7 @@ local defaults = {
   tray_thumbnails = true,
   tray_reserve_space = false,
   focus_blur = false,           -- blur/dim everything but the dock while it has the keyboard
-  double_tap_fullscreen = true, -- three-finger double tap toggles fullscreen
+  double_tap_fullscreen = true, -- three-finger double tap maximizes (bar stays visible)
 }
 
 local opt = {}
@@ -126,7 +127,9 @@ end
 -- libinput turns a three-finger tap into a middle click, so the double tap is
 -- a bind on the middle button, limited to the touchpads (a mouse's or
 -- trackpoint's middle button is left alone). A second tap within
--- double_tap_ms toggles fullscreen; a lone tap is handed on as the middle
+-- double_tap_ms maximizes the focused window, or puts back a maximized or
+-- fullscreen one (maximized keeps the top bar visible; true fullscreen would
+-- cover it); a lone tap is handed on as the middle
 -- click it was (paste, open in a new tab), just double_tap_ms late. While the
 -- tray has the keyboard, the double tap goes to the tray instead.
 local double_tap_ms = 300
@@ -157,7 +160,12 @@ function ThreeFinger.tap()
       hl.dispatch(hl.dsp.event("threefinger doubletap"))
     else
       local w = hl.get_active_window()
-      if w then hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "toggle", mode = "fullscreen" })) end
+      if w and (w.fullscreen or 0) ~= 0 then
+        -- An unset has to name the mode the window is in, or it does nothing.
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "unset", mode = w.fullscreen == 1 and "maximized" or "fullscreen" }))
+      elseif w then
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "set", mode = "maximized" }))
+      end
     end
     return
   end
@@ -177,6 +185,6 @@ if opt.double_tap_fullscreen then
   local pads = touchpad_names()
   if #pads > 0 then
     hl.bind("mouse:274", function() ThreeFinger.tap() end,
-      { description = "Three-finger double tap: toggle fullscreen", device = { inclusive = true, list = pads } })
+      { description = "Three-finger double tap: maximize", device = { inclusive = true, list = pads } })
   end
 end
