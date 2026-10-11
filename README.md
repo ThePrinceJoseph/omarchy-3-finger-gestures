@@ -7,9 +7,9 @@ Omarchy shell plugin:
 |---|---|
 | **Three fingers left / right** | Change workspace. The screen follows your fingers and glides into place when you let go. |
 | **Three fingers down** | *Minimize* the focused window: it shrinks down into a tray along the bottom of the screen. While a close prompt is up, cancel it instead. |
-| **Three fingers up** | While the tray has the keyboard: bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. Otherwise: offer to close the focused window. The window blurs behind a prompt; a quick double swipe up or a click on the prompt closes it, a single swipe up makes the prompt shake (it takes two), three fingers down or 3 seconds cancels. A quick double swipe up closes without waiting for the prompt. |
+| **Three fingers up** | While the tray has the keyboard: bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. On an empty workspace with the tray idle, the same. Otherwise: offer to close the window on screen. The window blurs behind a prompt; a quick double swipe up or a click on the prompt closes it, a single swipe up makes the prompt shake (it takes two), three fingers down or 3 seconds cancels. A quick double swipe up closes without waiting for the prompt. |
 | **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile, stopping at the ends. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
-| **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. The tray keeps the keyboard while tiles remain, so you can bring back the next one. |
+| **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. Either way, the tray keeps the keyboard while tiles remain, so you can bring back the next one. |
 | **Three-finger triple tap** | Undo the last close: the window comes back exactly as it was, onto the workspace you are on. Works for the last window closed with the gesture or from the tray, for 30 seconds. |
 | **Three-finger double tap** | Maximize the focused window, or put a maximized or fullscreen one back. The top bar stays visible. While the tray has the keyboard: flip whether the selected tile comes back maximized (a 󰊓 on the tile shows it will). |
 
@@ -18,8 +18,8 @@ and title) and only exists while something is minimized. Hover a tile for a ✕ 
 larger preview with the full title. Hover a tile to select
 it, click it to bring it back. When a tile lands, the tray takes the keyboard:
 **Left / Right** (or a **two-finger swipe** left or right) pick a tile, **Enter** (or two fingers up) brings it back, **Backspace** closes it,
-**Escape** (or Down, SUPER+M, a click outside the tray, or switching workspace) hands the
-keyboard back. **SUPER+M** hands it to the tray again later. It holds five windows by default (up to twelve): the idea is a quick
+**Escape** (or Down, SUPER+M, or a click outside the tray) hands the keyboard back.
+Switching workspace does not: carry windows over and bring them back there. **SUPER+M** hands it to the tray again later. It holds five windows by default (up to twelve): the idea is a quick
 way to carry a few windows to another workspace, not a window list.
 
 Hyprland has no real "minimize", so the tray is backed by a hidden special workspace
@@ -95,7 +95,8 @@ Omarchy's window animation speed.
 ## Good to know
 
 - **The dock takes the keyboard on purpose.** Right after a swipe down, typing goes to
-  the dock until you press Escape, click outside it or switch workspace, and a two-finger
+  the dock until you press Escape or click outside it (it keeps it across workspace
+  switches, so you can carry windows over), and a two-finger
   swipe anywhere picks a tile instead of scrolling. Turn on `focus_blur` to make that obvious: everything
   else on screen is lightly blurred and dimmed while the dock holds the keyboard; a workspace with no windows stays clear, since
   that is where the tiles are headed. Omarchy keeps blur off globally, so it is switched
@@ -143,13 +144,14 @@ Omarchy's window animation speed.
   keeps running, so sound from it keeps playing until then. If it asks about unsaved
   work when it really closes, it comes back on screen to ask. SUPER+W and an app's own
   close button close at once and cannot be undone.
-- **Closing with three fingers up** only happens when the tray does not have the keyboard,
-  so swipe down, then up, still brings a window straight back. To bring one back later,
-  press SUPER+M first (or click its tile). The prompt blurs the window by switching
+- **Closing with three fingers up** only happens when the tray does not have the keyboard
+  and the workspace has a window to close, so swipe down, then up, still brings a window
+  straight back, and so does swiping up on an empty workspace. Otherwise, to bring one
+  back, press SUPER+M first (or click its tile). The prompt blurs the window by switching
   Hyprland's blur on for a moment (Omarchy keeps it off), so slightly see-through windows
   elsewhere blur too while it is up; your blur settings are put back as it goes. Apps
   that ask before closing (unsaved work) still ask.
-- **Two fingers up keeps the tray's keyboard** while tiles remain, so the window it
+- **Swiping up (two or three fingers) keeps the tray's keyboard** while tiles remain, so the window it
   brought back gets the keyboard once you are done with the tray (Escape, a click, a
   workspace switch, or the last tile).
 - **Several monitors.** Flights are drawn on the monitor the window is on, and a window

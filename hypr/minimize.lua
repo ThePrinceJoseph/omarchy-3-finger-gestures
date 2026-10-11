@@ -709,6 +709,14 @@ function M.restore_selected()
   return M.restore_latest()
 end
 
+-- Three fingers up while the dock has the keyboard: restore the selected
+-- tile and tell the dock to keep the keyboard if tiles remain, so the next
+-- swipe (two or three fingers) brings the next one back too.
+function M.restore_selected_keep()
+  tray("keepKeyboard")
+  return M.restore_selected()
+end
+
 -- Restore everything in the dock at once.
 function M.restore_all()
   for _, w in ipairs(hl.get_workspace_windows(M.workspace)) do M.restore(w.address) end
@@ -807,8 +815,10 @@ function M.close_window(addr)
 end
 
 function M.close_swipe()
-  local w = hl.get_active_window()
-  if not w or (w.workspace and w.workspace.name == M.workspace) then return false end
+  -- Only a window on the workspace on screen (Hyprland's active window can be
+  -- a stale one from another workspace, or one already in the dock).
+  local w = target_window()
+  if not w or (w.workspace and (w.workspace.name == M.workspace or w.workspace.name == M.closed_ws)) then return false end
   local addr = w.address
   if M.recent_up and M.recent_up.addr == addr then
     M.close_window(addr)
@@ -840,6 +850,19 @@ function M.close_swipe()
   tray("closePrompt", rect_json(addr, ax, ay, sw, sh, mon, ',"title":' .. json_string(w.title ~= "" and w.title or w.class)))
   expire_later()
   return true
+end
+
+-- Three fingers up while the dock is idle: on a workspace with nothing on it
+-- there is nothing to close, so bring the selected tile here; otherwise offer
+-- to close the window on screen.
+function M.up_idle()
+  local mon = hl.get_monitor_at_cursor() or hl.get_active_monitor()
+  local ws = mon and mon.active_workspace or hl.get_active_workspace()
+  local here = ws and hl.get_workspace_windows(tostring(ws.id)) or {}
+  if #here == 0 and #(hl.get_workspace_windows(M.workspace) or {}) > 0 then
+    return M.restore_selected()
+  end
+  return M.close_swipe()
 end
 
 -- Three fingers down while the prompt is up cancels it (and minimizes

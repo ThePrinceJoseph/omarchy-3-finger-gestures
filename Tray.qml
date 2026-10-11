@@ -19,12 +19,14 @@ import qs.Commons
 // three-finger double tap flips whether the selected tile comes back
 // maximized (󰊓 on the tile),
 // Backspace/Delete closes. Escape, Down, the tray key or a click outside the
-// dock hand the keyboard back; restoring a tile, emptying the dock or
-// switching workspace does too.
+// dock hand the keyboard back; restoring the last tile or emptying the dock
+// does too. Switching workspace does not: the dock keeps it, so tiles can be
+// carried to another workspace and brought back there.
 // While the dock has the keyboard, the selected tile is what a three-finger
 // swipe up brings back (its address is written to `selectedPath`, which
-// minimize.lua reads). With the dock idle, three fingers up offers to close
-// the focused window instead (the close prompt, further down).
+// minimize.lua reads). With the dock idle, three fingers up brings it onto an
+// empty workspace, and elsewhere offers to close the window on screen (the
+// close prompt, further down).
 
 Item {
   id: root
@@ -269,8 +271,9 @@ Item {
     clientsProc.running = true
   }
 
-  // keepKeyboard: a two-finger swipe up keeps the keyboard while tiles remain,
-  // so the next swipe can bring another one back.
+  // keepKeyboard: a two- or three-finger swipe up keeps the keyboard while
+  // tiles remain, so the next swipe can bring another one back (Enter and a
+  // click hand it back).
   property bool keepFocusAfterRestore: false
   Timer { id: keepFocusReset; interval: 2000; onTriggered: root.keepFocusAfterRestore = false }
   function restore(address, keepKeyboard) {
@@ -341,6 +344,7 @@ Item {
     else if (cmd === "closePrompt") root.showClosePrompt(payload)
     else if (cmd === "closePromptHide") root.closePrompt = null
     else if (cmd === "closePromptNudge") root.promptNudges++
+    else if (cmd === "keepKeyboard") { if (root.windows.length > 1) { root.keepFocusAfterRestore = true; keepFocusReset.restart() } }
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -350,10 +354,11 @@ Item {
       if (!event || !event.name) return
       var name = String(event.name)
       if (name === "custom") { root.handleCustom(event.data); return }
-      // A workspace or monitor switch means the user has moved on: hand the
-      // keyboard back. While the dock holds it, Hyprland focuses no window on
-      // the new workspace, and the next swipe down would find nothing to take.
-      if (name === "workspace" || name === "workspacev2" || name === "focusedmon" || name === "focusedmonv2") { root.focusMode = false; return }
+      // A workspace switch keeps the keyboard with the dock: carrying windows
+      // to another workspace and bringing them back there (two fingers, or
+      // three fingers up) is what the tray is for. Hyprland focuses no window
+      // on the new workspace meanwhile, so a swipe down there takes the window
+      // under the cursor (minimize.lua's target_window).
       if (name === "movewindow" || name === "movewindowv2" || name === "openwindow"
           || name === "closewindow" || name === "windowtitle" || name === "windowtitlev2"
           || name === "configreloaded") refreshTimer.restart()

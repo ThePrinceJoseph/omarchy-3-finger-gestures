@@ -117,13 +117,14 @@ elseif opt.minimize and Minimize then
     f:close()
   end
   -- Down minimizes, or puts away a close prompt. Up brings the selected tile
-  -- back while the tray has the keyboard; otherwise it offers to close the
-  -- focused window (a quick double swipe up closes it).
+  -- back while the tray has the keyboard, or onto an empty workspace;
+  -- otherwise it offers to close the window on screen (a quick double swipe
+  -- up closes it).
   hl.gesture({ fingers = 3, direction = "down", action = function()
     if not Minimize.cancel_prompt() then Minimize.minimize() end
   end })
   hl.gesture({ fingers = 3, direction = "up", action = function()
-    if Minimize.dock_focused then Minimize.restore_selected() else Minimize.close_swipe() end
+    if Minimize.dock_focused then Minimize.restore_selected_keep() else Minimize.up_idle() end
   end })
   if opt.tray_key and opt.tray_key ~= "" and opt.tray_key ~= "none" then
     o.bind(opt.tray_key, "Minimized tray: toggle keyboard", "omarchy-shell minimized-tray focus")
