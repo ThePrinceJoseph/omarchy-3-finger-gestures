@@ -340,6 +340,7 @@ Item {
     else if (cmd === "doubletap") { if (root.focusMode) root.toggleSelectedFullscreen() }
     else if (cmd === "closePrompt") root.showClosePrompt(payload)
     else if (cmd === "closePromptHide") root.closePrompt = null
+    else if (cmd === "closePromptNudge") root.promptNudges++
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -767,6 +768,9 @@ Item {
   // window it is about to close shows through blurred, with a card on top.
   // Clicking the card closes; clicking the blurred window around it cancels.
   property var closePrompt: null   // { address, title, screenName, x, y, w, h } (screen-local)
+  // Bumped when a single swipe up lands on the prompt: the card shakes "no"
+  // and its red ring flares, to say it takes two quick swipes.
+  property int promptNudges: 0
   function showClosePrompt(payload) {
     var p
     try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad prompt payload: " + e); return }
@@ -808,16 +812,53 @@ Item {
 
       Rectangle {
         id: promptCard
-        anchors.centerIn: parent
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.horizontalCenterOffset: shakeX
+        property real shakeX: 0
+        property bool flaring: false
         width: Math.min(parent.width - 2 * root.pad, Math.max(promptText.implicitWidth, promptHint.implicitWidth, promptTitle.implicitWidth) + 4 * root.pad)
         height: promptColumn.implicitHeight + 3 * root.pad
         radius: Style.cornerRadius > 0 ? Style.space(12) : 0
         color: cardMouse.containsMouse ? Util.alpha(Color.urgent, 0.92) : Util.alpha(Color.popups.background, 0.94)
-        border.width: 1
-        border.color: Util.alpha(Color.urgent, 0.7)
+        border.width: flaring ? Style.space(3) : 1
+        border.color: flaring ? Color.urgent : Util.alpha(Color.urgent, 0.7)
         Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: 180 } }
         scale: promptWindow.visible ? 1 : 0.94
         Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+        // A glow outside the ring while it flares.
+        Rectangle {
+          anchors.fill: parent
+          anchors.margins: -Style.space(6)
+          radius: parent.radius + Style.space(6)
+          color: "transparent"
+          border.width: Style.space(6)
+          border.color: Util.alpha(Color.urgent, promptCard.flaring ? 0.35 : 0)
+          Behavior on border.color { ColorAnimation { duration: 180 } }
+          z: -1
+        }
+
+        Connections {
+          target: root
+          function onPromptNudgesChanged() {
+            if (!promptWindow.visible) return
+            promptCard.flaring = true
+            flareOff.restart()
+            shake.restart()
+          }
+        }
+        Timer { id: flareOff; interval: 650; onTriggered: promptCard.flaring = false }
+        SequentialAnimation {
+          id: shake
+          property real d: Style.space(14)
+          NumberAnimation { target: promptCard; property: "shakeX"; to: -shake.d; duration: 45; easing.type: Easing.OutQuad }
+          NumberAnimation { target: promptCard; property: "shakeX"; to: shake.d; duration: 70; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: promptCard; property: "shakeX"; to: -shake.d * 0.6; duration: 65; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: promptCard; property: "shakeX"; to: shake.d * 0.3; duration: 55; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: promptCard; property: "shakeX"; to: 0; duration: 45; easing.type: Easing.OutQuad }
+        }
 
         Column {
           id: promptColumn
@@ -837,7 +878,7 @@ Item {
             id: promptText
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: "Swipe up twice quickly to close"
+            text: "Double swipe up to close"
             color: Color.foreground
             font.family: Style.font.family; font.pixelSize: Style.font.title; font.bold: true
             textFormat: Text.PlainText

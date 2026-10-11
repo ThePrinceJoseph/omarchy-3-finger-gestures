@@ -646,10 +646,11 @@ end
 
 -- Three fingers up while the dock does not hold the keyboard: close the
 -- focused window, after a prompt the dock draws over it (the window blurred
--- behind it). A quick second swipe up closes, whether or not the prompt is
--- up yet, so a quick double swipe closes without waiting for it; so does a
--- click on the prompt. Three fingers down, a workspace switch or
--- M.prompt_ms of nothing puts it away.
+-- behind it). A quick double swipe up closes, whether or not the prompt is up
+-- yet; so does a click on the prompt. A single swipe up while the prompt is
+-- up is the wrong answer: the prompt shakes and flares (and the swipe still
+-- counts as the first half of a double). Three fingers down, a workspace
+-- switch or M.prompt_ms of nothing puts it away.
 M.prompt_ms = 3000
 M.double_swipe_ms = 800
 M.prompt = nil          -- { addr, token } while the prompt is up
@@ -684,15 +685,25 @@ function M.close_swipe()
   after(M.double_swipe_ms, function()
     if M.recent_up and M.recent_up.token == token then M.recent_up = nil end
   end)
+  local function expire_later()
+    after(M.prompt_ms, function()
+      if M.prompt and M.prompt.token == token then hide_prompt() end
+    end)
+  end
+  -- Already asking about this window: a single swipe is not the answer.
+  if M.prompt and M.prompt.addr == addr then
+    M.prompt.token = token
+    tray("closePromptNudge")
+    expire_later()
+    return true
+  end
   local ax, ay = vec(w.at)
   local sw, sh = vec(w.size)
   local mon = monitor(w.monitor)
   M.prompt = { addr = addr, token = token }
   set_blur("prompt", M.prompt_blur)
   tray("closePrompt", rect_json(addr, ax, ay, sw, sh, mon, ',"title":' .. json_string(w.title ~= "" and w.title or w.class)))
-  after(M.prompt_ms, function()
-    if M.prompt and M.prompt.token == token then hide_prompt() end
-  end)
+  expire_later()
   return true
 end
 
