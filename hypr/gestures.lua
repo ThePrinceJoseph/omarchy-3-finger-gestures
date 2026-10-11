@@ -32,6 +32,11 @@ local defaults = {
   tray_reserve_space = false,
   focus_blur = false,           -- blur/dim everything but the dock while it has the keyboard
   double_tap_fullscreen = true, -- three-finger double tap maximizes (bar stays visible)
+  tray_takes_keyboard = true,   -- the dock takes the keyboard when a tile lands
+  tray_two_finger = true,       -- two-finger swipes in the dock
+  swipe_up_close = true,        -- three fingers up (tray idle) offers to close
+  swipe_up_notifications = true,-- three fingers up dismisses notifications first
+  undo_close = true,            -- closes wait 30 s; triple tap undoes
 }
 
 local opt = {}
@@ -102,6 +107,11 @@ if opt.minimize and Minimize and not dock_present then
 elseif opt.minimize and Minimize then
   Minimize.max_windows = math.max(1, math.min(12, math.floor(tonumber(opt.tray_max) or 5)))
   Minimize.thumbnails = opt.tray_thumbnails and true or false
+  Minimize.features = {
+    close = opt.swipe_up_close and true or false,
+    notifications = opt.swipe_up_notifications and true or false,
+    undo = opt.undo_close and true or false,
+  }
   -- The dock plugin reads its look from this file (it watches for changes).
   local f = io.open(os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-settings.json", "w")
   if f then
@@ -110,11 +120,12 @@ elseif opt.minimize and Minimize then
     local natural = hl.get_config("input.touchpad.natural_scroll")
     local scroll_factor = tonumber(hl.get_config("input.touchpad.scroll_factor")) or 1
     f:write(string.format('{"reserveSpace": %s, "thumbnails": %s, "focusBlur": %s, "naturalScroll": %s, '
-      .. '"swipeCommit": %.2f, "swipeForce": %.2f, "scrollFactor": %.3f}\n',
+      .. '"swipeCommit": %.2f, "swipeForce": %.2f, "scrollFactor": %.3f, "takesKeyboard": %s, "twoFinger": %s}\n',
       opt.tray_reserve_space and "true" or "false", Minimize.thumbnails and "true" or "false",
       opt.focus_blur and "true" or "false", (natural == true or natural == 1) and "true" or "false",
       (tonumber(opt.swipe_distance) or 500) * (tonumber(opt.swipe_cancel_ratio) or 0.12),
-      tonumber(opt.swipe_min_speed_to_force) or 25, scroll_factor))
+      tonumber(opt.swipe_min_speed_to_force) or 25, scroll_factor,
+      opt.tray_takes_keyboard and "true" or "false", opt.tray_two_finger and "true" or "false"))
     f:close()
   end
   -- Down minimizes, or puts away a close prompt. Up dismisses notifications
@@ -195,17 +206,19 @@ function ThreeFinger.tap()
     local n = taps
     taps = 0
     if n >= 3 then
-      if Minimize and Minimize.undo_close then Minimize.undo_close() end
-    elseif n == 2 then
+      if opt.undo_close and Minimize and Minimize.undo_close then Minimize.undo_close() end
+    elseif n == 2 and opt.double_tap_fullscreen then
       double_tap()
     elseif not (Minimize and Minimize.dock_focused) then
-      -- A lone tap in the tray means nothing; elsewhere it is a middle click.
-      hl.dispatch(hl.dsp.send_shortcut({ mods = "", key = "mouse:274" }))
+      -- Taps that mean nothing here are the middle clicks they were.
+      for _ = 1, math.max(1, n) do hl.dispatch(hl.dsp.send_shortcut({ mods = "", key = "mouse:274" })) end
     end
   end, { timeout = tap_gap_ms, type = "oneshot" })
 end
 
-if opt.double_tap_fullscreen then
+-- The bind is only there while a tap means something; with both off, three
+-- finger taps are plain middle clicks again, with no delay.
+if opt.double_tap_fullscreen or opt.undo_close then
   local pads = touchpad_names()
   if #pads > 0 then
     hl.bind("mouse:274", function() ThreeFinger.tap() end,

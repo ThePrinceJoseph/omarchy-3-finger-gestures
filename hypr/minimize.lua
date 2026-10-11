@@ -51,6 +51,9 @@ M.thumb_dir = os.getenv("HOME") .. "/.cache/threefinger-tray"
 M.inflight = M.inflight or {} -- address -> what a minimize in progress needs when the dock calls back
 M.arriving = M.arriving or {} -- workspace -> restores started but not yet moved there
 M.dock_focused = M.dock_focused or false -- the dock holds the keyboard (it says so on every change)
+-- Switches from the bar widget (gestures.lua sets them): three fingers up
+-- closes, swipe up dismisses notifications first, closes can be undone.
+M.features = M.features or { close = true, notifications = true, undo = true }
 
 -- ------------------------------------------------------------------ helpers
 
@@ -592,6 +595,10 @@ function M.soft_close(addr)
   local w = find(addr)
   if not w then return false end
   if w.workspace and w.workspace.name == M.closed_ws then return false end
+  if not M.features.undo then
+    hl.dispatch(hl.dsp.window.close({ window = w }))
+    return true
+  end
   if M.held and M.held.addr ~= addr then really_close(M.held.addr) end
   -- Out of the dock: it is no longer minimized.
   if w.workspace and w.workspace.name == M.workspace then
@@ -628,6 +635,10 @@ end
 -- workspace on screen, maximized again if it was (or fullscreen: maximized,
 -- so the top bar stays visible).
 function M.undo_close()
+  if not M.features.undo then
+    notify("Undo is switched off", "Turn on \"Undo a close\" in the 3 Finger Gestures bar widget.")
+    return false
+  end
   local addr = M.held and M.held.addr
   local w = addr and find(addr)
   if not (w and w.workspace and w.workspace.name == M.closed_ws) then
@@ -858,13 +869,13 @@ end
 -- Hyprland calls this when three fingers have started moving up.
 function M.swipe_up_start()
   M.up_swipe = nil
-  if notifications_up() then
+  if M.features.notifications and notifications_up() then
     hl.exec_cmd("omarchy-shell notifications dismissAll")
     M.up_swipe = { what = "notifications" }
     return "notifications"
   end
-  if M.dock_focused then
-    M.up_swipe = { what = "restore", keep = true }
+  if M.dock_focused or not M.features.close then
+    M.up_swipe = { what = "restore", keep = M.dock_focused }
     return "restore"
   end
   local mon = hl.get_monitor_at_cursor() or hl.get_active_monitor()

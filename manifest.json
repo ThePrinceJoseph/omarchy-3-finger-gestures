@@ -43,7 +43,12 @@
       "tray_thumbnails": true,
       "tray_reserve_space": false,
       "focus_blur": false,
-      "double_tap_fullscreen": true
+      "double_tap_fullscreen": true,
+      "tray_takes_keyboard": true,
+      "tray_two_finger": true,
+      "swipe_up_close": true,
+      "swipe_up_notifications": true,
+      "undo_close": true
     },
     "schema": [
       {
@@ -98,9 +103,44 @@
       {
         "key": "double_tap_fullscreen",
         "type": "boolean",
-        "label": "Double / triple tap",
+        "label": "Double tap: maximize",
         "defaultValue": true,
-        "description": "Three-finger double tap maximizes the focused window or puts it back (top bar visible; in the tray: how the selected tile comes back). Triple tap undoes the last close (gesture or tray, within 30 s). A single three-finger tap (middle click) arrives 0.3 s late."
+        "description": "Three-finger double tap maximizes the focused window or puts it back; the top bar stays visible. In the tray it sets whether the selected tile comes back maximized."
+      },
+      {
+        "key": "tray_takes_keyboard",
+        "type": "boolean",
+        "label": "Tray takes the keyboard",
+        "defaultValue": true,
+        "description": "When a tile lands, the tray takes the keyboard (arrows, Enter, two-finger swipes). Off: only the tray key hands it over."
+      },
+      {
+        "key": "tray_two_finger",
+        "type": "boolean",
+        "label": "Two-finger swipe in the tray",
+        "defaultValue": true,
+        "description": "While the tray has the keyboard, two fingers sideways pick a tile and two fingers up bring it back."
+      },
+      {
+        "key": "swipe_up_close",
+        "type": "boolean",
+        "label": "Three fingers up closes",
+        "defaultValue": true,
+        "description": "With the tray idle, three fingers up offers to close the window on screen (a quick double swipe closes). Off: three fingers up always brings the selected tile back."
+      },
+      {
+        "key": "swipe_up_notifications",
+        "type": "boolean",
+        "label": "Swipe up dismisses notifications",
+        "defaultValue": true,
+        "description": "Three fingers up dismisses any notification on screen before doing anything else."
+      },
+      {
+        "key": "undo_close",
+        "type": "boolean",
+        "label": "Undo a close: triple tap",
+        "defaultValue": true,
+        "description": "A window closed by the gesture or from the tray waits 30 seconds, and a three-finger triple tap brings it back. Off: it closes at once."
       },
       {
         "key": "tray_key",

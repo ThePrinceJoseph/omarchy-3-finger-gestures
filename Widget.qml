@@ -24,7 +24,8 @@ Panel {
     minimize: true, swipe_distance: 500, swipe_cancel_ratio: 0.12, swipe_min_speed_to_force: 25,
     slide_speed: 4.5, instant_keyboard_switch: true, persistent_workspaces: 5,
     tray_key: "SUPER + M", tray_max: 5, tray_thumbnails: true, tray_reserve_space: false, focus_blur: false,
-    double_tap_fullscreen: true
+    double_tap_fullscreen: true, tray_takes_keyboard: true, tray_two_finger: true,
+    swipe_up_close: true, swipe_up_notifications: true, undo_close: true
   })
   readonly property bool minimizeOn: get("minimize") === true
 
@@ -220,10 +221,18 @@ Panel {
             onClicked: root.save({ instant_keyboard_switch: root.get("instant_keyboard_switch") !== true })
           }
           SettingNumber { label: "Persistent workspaces"; from: 0; to: 10; value: Number(root.get("persistent_workspaces")); onCommitted: function(v) { root.save({ persistent_workspaces: v }) } }
-          Toggle {
-            width: parent.width; label: "Double / triple tap"; description: "Three fingers: double tap maximizes or puts back (in the tray: how the selected tile comes back), triple tap undoes the last close. A single three-finger tap arrives 0.3 s late."
-            checked: root.get("double_tap_fullscreen") === true; foreground: root.foreground; fontFamily: root.fontFamily
-            onClicked: root.save({ double_tap_fullscreen: root.get("double_tap_fullscreen") !== true })
+
+          PanelSeparator { foreground: root.foreground }
+
+          // ---------- Three fingers up and taps ----------
+          Column {
+            width: parent.width
+            spacing: Style.space(12)
+            PanelSectionHeader { text: "THREE FINGERS UP AND TAPS"; foreground: root.foreground; fontFamily: root.fontFamily }
+            FeatureToggle { key: "swipe_up_close"; label: "Three fingers up closes"; description: "With the tray idle, offer to close the window on screen; a quick double swipe closes. Off: always brings the selected tile back." }
+            FeatureToggle { key: "swipe_up_notifications"; label: "Swipe up dismisses notifications"; description: "Any notification on screen goes first; the swipe does nothing else." }
+            FeatureToggle { key: "undo_close"; label: "Undo a close: triple tap"; description: "A window closed by the gesture or from the tray waits 30 s; a three-finger triple tap brings it back. Off: it closes at once." }
+            FeatureToggle { key: "double_tap_fullscreen"; label: "Double tap: maximize"; description: "Maximize the focused window or put it back, top bar visible. In the tray: how the selected tile comes back. With either tap on, a single three-finger tap arrives 0.3 s late." }
           }
 
           PanelSeparator { foreground: root.foreground }
@@ -237,6 +246,8 @@ Panel {
 
             PanelSectionHeader { text: "MINIMIZE TRAY"; foreground: root.foreground; fontFamily: root.fontFamily }
             SettingNumber { label: "Capacity"; from: 1; to: 12; value: Number(root.get("tray_max")); onCommitted: function(v) { root.save({ tray_max: v }) } }
+            FeatureToggle { key: "tray_takes_keyboard"; label: "Tray takes the keyboard"; description: "When a tile lands: arrows, Enter and two-finger swipes go to the tray until Escape. Off: only the tray key hands it over." }
+            FeatureToggle { key: "tray_two_finger"; label: "Two-finger swipe in the tray"; description: "While the tray has the keyboard, two fingers sideways pick a tile and two fingers up bring it back." }
             Toggle {
               width: parent.width; label: "Thumbnails"; description: "A picture of each window in its tile. Taken as the window minimizes."
               checked: root.get("tray_thumbnails") === true; foreground: root.foreground; fontFamily: root.fontFamily
@@ -375,6 +386,18 @@ Panel {
         value: row.value
         onReleased: function(v) { row.committed(root.snap(v)) }
       }
+      // Two-finger scrolling must not nudge the slider: catch the wheel above
+      // it and scroll the panel instead when it overflows. Clicks and drags
+      // pass through (no buttons accepted).
+      MouseArea {
+        anchors.fill: slider
+        acceptedButtons: Qt.NoButton
+        z: 5
+        onWheel: function(wheel) {
+          wheel.accepted = true
+          if (scroll.interactive) scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, scroll.contentY - wheel.angleDelta.y))
+        }
+      }
       // Recommended stop: a marker under the track, centred on where the knob
       // sits at that value (same clamp PanelSlider uses). Click it to go back.
       Item {
@@ -424,6 +447,16 @@ Panel {
       Text { id: lowText; anchors.bottom: parent.bottom; text: row.low; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.left: parent.left; anchors.leftMargin: Style.space(6) }
       Text { anchors.bottom: parent.bottom; text: row.high; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.right: parent.right; anchors.rightMargin: Style.space(6) }
     }
+  }
+
+  // A boolean setting as a switch row.
+  component FeatureToggle: Toggle {
+    property string key: ""
+    width: parent ? parent.width : 0
+    checked: root.get(key) === true
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    onClicked: { var patch = {}; patch[key] = root.get(key) !== true; root.save(patch) }
   }
 
   component SettingNumber: NumberField {

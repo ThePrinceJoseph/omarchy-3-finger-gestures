@@ -49,6 +49,8 @@ Item {
   property real swipeCommit: 60
   property real swipeForce: 25
   property real scrollFactor: 1
+  property bool takesKeyboard: true
+  property bool twoFinger: true
 
   property var windows: []
   property int selectedIndex: -1
@@ -73,6 +75,8 @@ Item {
       if (Number(cfg.swipeCommit) > 0) root.swipeCommit = Number(cfg.swipeCommit)
       if (cfg.swipeForce !== undefined && Number(cfg.swipeForce) >= 0) root.swipeForce = Number(cfg.swipeForce)
       if (Number(cfg.scrollFactor) > 0) root.scrollFactor = Number(cfg.scrollFactor)
+      root.takesKeyboard = cfg.takesKeyboard !== false
+      root.twoFinger = cfg.twoFinger !== false
     } catch (e) {
       root.log("could not parse " + root.settingsPath + ": " + e)
     }
@@ -190,7 +194,7 @@ Item {
     root.setSelected(index >= 0 ? index : next.length - 1)
     if (next.length === 0 || (restored && !root.keepFocusAfterRestore)) root.focusMode = false
     if (restored) root.keepFocusAfterRestore = false
-    else if (newest) root.focusMode = true
+    else if (newest && root.takesKeyboard) root.focusMode = true
   }
 
   function tagNames(tags) {
@@ -441,6 +445,7 @@ Item {
   }
   // One two-finger scroll event: <dx>, <dy> touchpad units (Qt's signs).
   function swipe(dx, dy) {
+    if (!root.twoFinger) return
     swipeEnd.restart()
     root.swipeX += dx
     root.swipeY += dy
@@ -526,7 +531,7 @@ Item {
             root.swipe(px / root.scrollFactor, py / root.scrollFactor)
           } else if (root.swipeActive || (Math.abs(ax) < 120 && Math.abs(ay) < 120)) {
             if (root.swipeActive) swipeEnd.restart()
-          } else if (Math.abs(ax) >= Math.abs(ay)) {
+          } else if (root.twoFinger && Math.abs(ax) >= Math.abs(ay)) {
             root.stepSelection(ax > 0 ? 1 : -1)
           }
         }

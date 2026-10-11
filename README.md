@@ -27,7 +27,8 @@ screen holds the windows you have tucked away.
 - **Maximized and fullscreen windows** come back maximized onto an empty workspace and
   tile onto a busy one. Nothing the plugin does covers the bar.
 - **Settings in the bar.** A 󱂬 button with sliders and switches for all of it, or
-  `omarchy bar set threefinger.gestures <key> <value>`.
+  `omarchy bar set threefinger.gestures <key> <value>`. Every feature above has a switch,
+  so turn off what you do not like.
 - **Survives reloads.** Window state rides along on Hyprland window tags, so a config
   reload or a shell restart mid-animation leaves nothing stranded.
 
@@ -113,7 +114,12 @@ omarchy bar set threefinger.gestures tray_max 8
 | `tray_max` | `5` | How many windows the tray holds, 1 to 12. Swipe down on a full tray shows a notification. |
 | `tray_thumbnails` | `true` | A picture of each window in its tile, taken as it minimizes. |
 | `focus_blur` | `false` | While the dock has the keyboard, lightly blur and dim everything else. Empty workspaces stay clear. |
-| `double_tap_fullscreen` | `true` | Three-finger double tap maximizes the focused window or puts it back, top bar visible (in the tray: how the selected tile comes back). A single three-finger tap is still a middle click, about 0.3 s late. |
+| `double_tap_fullscreen` | `true` | Three-finger double tap maximizes the focused window or puts it back, top bar visible (in the tray: how the selected tile comes back). |
+| `undo_close` | `true` | A window closed by the gesture or from the tray waits 30 s; a three-finger triple tap brings it back. `false`: it closes at once. With both tap settings off, three-finger taps are instant middle clicks again; with either on, a single tap arrives about 0.3 s late. |
+| `swipe_up_close` | `true` | With the tray idle, three fingers up offers to close the window on screen. `false`: three fingers up always brings the selected tile back. |
+| `swipe_up_notifications` | `true` | Three fingers up dismisses any notification on screen before doing anything else. |
+| `tray_takes_keyboard` | `true` | The tray takes the keyboard when a tile lands. `false`: only the tray key hands it over. |
+| `tray_two_finger` | `true` | Two-finger swipes in the tray: sideways picks a tile, up brings it back. |
 | `tray_reserve_space` | `false` | `true` makes tiled windows shrink to make room for the tray. `false` floats it over the bottom edge and nothing else moves. |
 
 The three `swipe_*` settings also drive the two-finger swipe in the tray, so one feel
@@ -134,7 +140,7 @@ Omarchy's window animation speed.
   that is where the tiles are headed. Omarchy keeps blur off globally, so it is switched
   on only for that moment and your own blur settings are put back afterwards (strength:
   `M.scrim_blur` in `minimize.lua`). If you would rather it never grabbed the keyboard,
-  remove the `else if (newest) root.focusMode = true` line in `Tray.qml`.
+  turn off `tray_takes_keyboard`.
 - **Why 5, and at most 12.** Tiles share the screen width and titles shrink to fit: on a
   1280-wide screen five tiles keep about 22 characters of title, twelve are down to a
   picture and an icon.
