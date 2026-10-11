@@ -37,6 +37,11 @@ Item {
   property bool thumbnails: true
   property bool focusBlur: false
   property bool naturalScroll: true
+  // The workspace swipe's own numbers (swipe_distance x swipe_cancel_ratio,
+  // swipe_min_speed_to_force) and the touchpad scroll factor, from gestures.lua.
+  property real swipeCommit: 60
+  property real swipeForce: 25
+  property real scrollFactor: 1
 
   property var windows: []
   property int selectedIndex: -1
@@ -59,6 +64,9 @@ Item {
       root.thumbnails = cfg.thumbnails !== false
       root.focusBlur = cfg.focusBlur === true
       root.naturalScroll = cfg.naturalScroll !== false
+      if (Number(cfg.swipeCommit) > 0) root.swipeCommit = Number(cfg.swipeCommit)
+      if (cfg.swipeForce !== undefined && Number(cfg.swipeForce) >= 0) root.swipeForce = Number(cfg.swipeForce)
+      if (Number(cfg.scrollFactor) > 0) root.scrollFactor = Number(cfg.scrollFactor)
     } catch (e) {
       root.log("could not parse " + root.settingsPath + ": " + e)
     }
@@ -317,24 +325,36 @@ Item {
     return { x: dockX + root.pad + index * (w + root.gap), y: dockY + root.pad, w: w, h: h }
   }
 
-  // Two-finger travel adds up in scroll units (about a pixel of finger travel
-  // each, after Hyprland's touchpad scroll_factor; Omarchy's 0.4 makes a tile
-  // roughly 75 px of travel). A pause forgets the remainder, so the next
-  // swipe starts clean.
-  readonly property int swipeStep: 30
-  property real swipeAcc: 0
-  Timer { id: swipeReset; interval: 250; onTriggered: root.swipeAcc = 0 }
-  function swipe(dx) {
-    // Qt reports a scroll "to the left" as a positive x; with natural
-    // scrolling that is the fingers moving right. The highlight follows the fingers.
-    root.swipeAcc += root.naturalScroll ? dx : -dx
-    swipeReset.restart()
-    while (Math.abs(root.swipeAcc) >= root.swipeStep) {
-      var dir = root.swipeAcc > 0 ? 1 : -1
-      root.moveSelection(dir)
-      root.swipeAcc -= dir * root.swipeStep
-    }
+  // Two-finger swipe, by the three-finger workspace swipe's rule: one swipe
+  // moves one tile. It commits once the fingers have travelled swipeCommit
+  // (swipe_distance x swipe_cancel_ratio) touchpad units, or, when they lift
+  // short of that, if the swipe was a flick: its average step reached
+  // swipeForce (swipe_min_speed_to_force). The fingers lifting shows up as
+  // a pause in the scroll events.
+  property real swipeTravel: 0
+  property real swipeStepSum: 0
+  property int swipeSteps: 0
+  property bool swipeDone: false
+  function swipeMove(units) {
+    if (root.swipeDone) return
+    var dir = units > 0 ? 1 : -1
+    root.moveSelection(root.naturalScroll ? dir : -dir)
+    root.swipeDone = true
   }
+  // <units> of finger travel (Qt's sign: a scroll to the left is positive).
+  function swipe(units) {
+    root.swipeTravel += units
+    root.swipeStepSum += Math.abs(units)
+    root.swipeSteps++
+    swipeEnd.restart()
+    if (Math.abs(root.swipeTravel) >= root.swipeCommit) root.swipeMove(root.swipeTravel)
+  }
+  function swipeLifted() {
+    if (!root.swipeDone && Math.abs(root.swipeTravel) >= 2 && root.swipeForce > 0
+        && root.swipeSteps > 0 && root.swipeStepSum / root.swipeSteps >= root.swipeForce) root.swipeMove(root.swipeTravel)
+    root.swipeTravel = 0; root.swipeStepSum = 0; root.swipeSteps = 0; root.swipeDone = false
+  }
+  Timer { id: swipeEnd; interval: 150; onTriggered: root.swipeLifted() }
 
   // One dock per screen; only the one on the focused screen takes the keyboard.
   Variants {
@@ -374,9 +394,9 @@ Item {
       // While the dock holds the keyboard, Hyprland sends every pointer event
       // on the screen to it, wherever the cursor is (an exclusive layer surface
       // gets all pointer focus). This item reaches far past the card to catch
-      // them: two-finger travel (a horizontal scroll) adds up and moves the
-      // highlight one tile per swipeStep, and a click outside the card hands
-      // the keyboard back. Declared first, so the tiles stay on top.
+      // them: a two-finger swipe (a horizontal scroll) moves the highlight one
+      // tile, and a click outside the card hands the keyboard back. Declared
+      // first, so the tiles stay on top.
       MouseArea {
         id: outside
         x: -20000; y: -20000; width: 40000; height: 40000
@@ -388,12 +408,19 @@ Item {
         }
         onWheel: function(wheel) {
           wheel.accepted = true
-          // Qt hands finger scrolling over as an angle, 8 per scroll unit and
-          // no pixelDelta on Wayland; a mouse wheel notch is a multiple of 120.
+          // A touchpad scroll arrives as pixels: finger travel times Hyprland's
+          // touchpad scroll_factor, which is divided back out so the units are
+          // the ones the workspace swipe measures. A mouse wheel has no pixels:
+          // one notch (120) is one tile.
           var ax = wheel.angleDelta.x, ay = wheel.angleDelta.y
-          if (ax === 0 || Math.abs(ax) < Math.abs(ay)) return
-          if (Math.abs(ax) === 120 && wheel.pixelDelta.x === 0) root.swipe(ax / 120 * root.swipeStep)  // a notch per tile
-          else root.swipe(wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : ax / 8)
+          var px = wheel.pixelDelta.x, py = wheel.pixelDelta.y
+          if (px !== 0 || py !== 0) {
+            if (Math.abs(px) >= Math.abs(py)) root.swipe(px / root.scrollFactor)
+          } else if (ax !== 0 && Math.abs(ax) >= Math.abs(ay)) {
+            var notches = Math.round(ax / 120) || (ax > 0 ? 1 : -1)
+            for (var n = 0; n < Math.abs(notches); n++) { root.swipeDone = false; root.swipeMove(ax) }
+            root.swipeDone = false
+          }
         }
       }
 
@@ -977,7 +1004,7 @@ Item {
     function restoreSelected(): string { root.restore(root.selectedAddress); return "ok" }
     function icon(appClass: string): string { return root.iconFor({ "class": appClass }) }
     function layout(): string { return String(root.dockGeometry.width) + "x" + String(root.dockGeometry.height) + " at x=" + String(root.dockGeometry.x) }
-    // Debug: feed the two-finger swipe <dx> scroll units of travel.
+    // Debug: feed one two-finger scroll event of <units> touchpad units, as the dock would.
     function swipe(dx: int): string { root.swipe(dx); return root.selectedAddress }
     // Debug: force the hover preview for tile <index> (-1 hides).
     function preview(index: int): string { root.hoverIndex = index; root.previewIndex = index; return "ok" }

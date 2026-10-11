@@ -8,7 +8,7 @@ Omarchy shell plugin:
 | **Three fingers left / right** | Change workspace. The screen follows your fingers and glides into place when you let go. |
 | **Three fingers down** | *Minimize* the focused window: it shrinks down into a tray along the bottom of the screen. |
 | **Three fingers up** | Bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. |
-| **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight to the next or previous tile. Swipe anywhere; the highlight follows your fingers. |
+| **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
 
 The dock shows one tile per minimized window (a picture of the window, its app icon
 and title) and only exists while something is minimized. Hover a tile for a ✕ and a
@@ -77,6 +77,9 @@ omarchy bar set threefinger.gestures tray_max 8
 | `tray_thumbnails` | `true` | A picture of each window in its tile, taken as it minimizes. |
 | `focus_blur` | `false` | While the dock has the keyboard, lightly blur and dim everything else. Empty workspaces stay clear. |
 | `tray_reserve_space` | `false` | `true` makes tiled windows shrink to make room for the tray. `false` floats it over the bottom edge and nothing else moves. |
+
+The three `swipe_*` settings also drive the two-finger swipe in the tray, so one feel
+covers both.
 
 Settings live in the plugin's entry in `~/.config/omarchy/shell.json`. The generated
 `~/.config/hypr/gestures-settings.lua` is rewritten from them; do not edit it by hand.
