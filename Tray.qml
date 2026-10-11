@@ -123,29 +123,6 @@ Item {
     return Quickshell.iconPath("application-x-executable", true)
   }
 
-  // Three-finger triple tap: start the most recently closed app again
-  // (minimize.lua keeps the list). A window that had its own process comes
-  // back with that process's exact command (a terminal with its program and
-  // folder); one that shared a process (a browser window, a web app) from the
-  // app's desktop entry, which the dock already finds for its icons.
-  function reopenApp(payload) {
-    var p
-    try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad reopen payload: " + e); return "bad json" }
-    var cmd = Array.isArray(p.cmd) ? p.cmd.map(String) : []
-    var entry = root.entryForClass(String(p["class"] || ""))
-    var how
-    if (cmd.length > 0 && !p.shared) how = ["uwsm-app", "--"].concat(cmd)
-    else if (entry && entry.id) how = ["uwsm-app", "--", entry.id + ".desktop"]
-    else if (cmd.length > 0) how = ["uwsm-app", "--"].concat(cmd)
-    if (!how) {
-      Quickshell.execDetached(["notify-send", "-a", "3 Finger Gestures", "-t", "2500", "Can't reopen " + (p.title || p["class"] || "that app"), "No launch command or desktop entry found."])
-      return "nothing to run"
-    }
-    root.log("reopen " + JSON.stringify(how))
-    Quickshell.execDetached(how)
-    return how.join(" ")
-  }
-
   function isMinimized(list, address) {
     for (var i = 0; i < list.length; i++) {
       var c = list[i]
@@ -168,7 +145,9 @@ Item {
     var newest = ""
     var restored = false
     var alive = ({})
-    for (var a = 0; a < list.length; a++) if (list[a] && list[a].address) alive[String(list[a].address)] = true
+    // A window waiting in special:closed (closed, undoable) counts as gone.
+    for (var a = 0; a < list.length; a++)
+      if (list[a] && list[a].address && !(list[a].workspace && list[a].workspace.name === "special:closed")) alive[String(list[a].address)] = true
     // A tile that left the dock but whose window still exists was restored
     // (by swipe, click or Enter): the dock is done, hand the keyboard back.
     // A closed window just disappears and the dock stays in use.
@@ -307,11 +286,9 @@ Item {
   function closeWindow(address) {
     if (!address) return
     root.previewIndex = -1
-    // Resolve the window first: a close with no target would hit the focused
-    // window if this tile's window vanished a moment ago.
+    // Through minimize.lua, so a three-finger triple tap can undo it.
     Quickshell.execDetached(["hyprctl", "dispatch",
-      "(function() local w = hl.get_window('address:" + address + "'); "
-      + "if w then hl.dispatch(hl.dsp.window.close({ window = w })) end; return hl.dsp.no_op() end)()"])
+      "(function() if Minimize and Minimize.soft_close then Minimize.soft_close('" + address + "') end; return hl.dsp.no_op() end)()"])
   }
 
   function toggleFocus() {
@@ -364,7 +341,6 @@ Item {
     else if (cmd === "closePrompt") root.showClosePrompt(payload)
     else if (cmd === "closePromptHide") root.closePrompt = null
     else if (cmd === "closePromptNudge") root.promptNudges++
-    else if (cmd === "reopen") root.reopenApp(payload)
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -604,15 +580,24 @@ Item {
               width: dock.tileWidth
               height: root.tileHeightFor(dock.tileWidth)
 
-              // Whole-tile handler, declared first so the ✕ sits above it.
+              // Hover over the whole tile, ✕ included: a passive handler, so
+              // moving onto the ✕ (its own MouseArea) does not count as leaving
+              // the tile. (With MouseArea hover it did: the ✕ faded, switched
+              // itself off half way, the tile was hovered again, and so on.)
+              HoverHandler {
+                id: tileHover
+                cursorShape: Qt.PointingHandCursor
+                onHoveredChanged: {
+                  if (hovered) { root.setSelected(tile.index); root.hoverTile(tile.index) }
+                  else if (root.hoverIndex === tile.index) root.hoverTile(-1)
+                }
+              }
+
+              // Whole-tile clicks, declared first so the ✕ sits above it.
               MouseArea {
                 id: mouse
                 anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
                 acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-                onEntered: { root.setSelected(tile.index); root.hoverTile(tile.index) }
-                onExited: if (root.hoverIndex === tile.index) root.hoverTile(-1)
                 onClicked: function(event) {
                   if (event.button === Qt.MiddleButton) root.closeWindow(tile.modelData.address)
                   else root.restore(tile.modelData.address)
@@ -674,9 +659,9 @@ Item {
                   width: Style.space(20); height: width; radius: width / 2
                   readonly property bool hot: closeMouse.containsMouse
                   // Mouse only (Backspace closes the selected tile from the keyboard); fades with the hover.
-                  opacity: tile.hovered ? 1 : 0
+                  opacity: tileHover.hovered ? 1 : 0
                   Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                  enabled: opacity > 0.5
+                  enabled: tileHover.hovered
                   color: hot ? Util.alpha(Color.urgent, 0.85) : Util.alpha(Color.popups.background, 0.85)
                   border.width: 1
                   border.color: Util.alpha(Color.foreground, hot ? 0.6 : 0.3)
@@ -687,7 +672,6 @@ Item {
                     enabled: closeButton.enabled
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onEntered: root.hoverTile(tile.index)
                     onClicked: root.closeWindow(tile.modelData.address)
                   }
                 }

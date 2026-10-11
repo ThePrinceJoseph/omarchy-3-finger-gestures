@@ -10,7 +10,7 @@
 --   double tap    maximize the focused window or put it back (the top bar stays
 --                 visible); while the tray has the keyboard, whether the
 --                 selected tile comes back maximized
---   triple tap    reopen the most recently closed app
+--   triple tap    undo the last close (gesture, prompt or tray)
 --
 -- Settings come from the bar widget (or `omarchy bar set threefinger.gestures
 -- <key> <value>`), which writes ~/.config/hypr/gestures-settings.lua through
@@ -143,7 +143,7 @@ end
 --          one (maximized keeps the top bar visible; true fullscreen would
 --          cover it); while the tray has the keyboard, flip whether the
 --          selected tile comes back maximized
---   three  reopen the most recently closed app (Minimize.reopen_closed)
+--   three  undo the last close (Minimize.undo_close)
 -- So a single tap arrives tap_gap_ms late, and so does a double tap's action.
 local tap_gap_ms = 300
 
@@ -190,7 +190,7 @@ function ThreeFinger.tap()
     local n = taps
     taps = 0
     if n >= 3 then
-      if Minimize and Minimize.reopen_closed then Minimize.reopen_closed() end
+      if Minimize and Minimize.undo_close then Minimize.undo_close() end
     elseif n == 2 then
       double_tap()
     elseif not (Minimize and Minimize.dock_focused) then
@@ -204,6 +204,6 @@ if opt.double_tap_fullscreen then
   local pads = touchpad_names()
   if #pads > 0 then
     hl.bind("mouse:274", function() ThreeFinger.tap() end,
-      { description = "Three-finger taps: maximize (two), reopen closed app (three)", device = { inclusive = true, list = pads } })
+      { description = "Three-finger taps: maximize (two), undo close (three)", device = { inclusive = true, list = pads } })
   end
 end

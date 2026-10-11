@@ -10,7 +10,7 @@ Omarchy shell plugin:
 | **Three fingers up** | While the tray has the keyboard: bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. Otherwise: offer to close the focused window. The window blurs behind a prompt; a quick double swipe up or a click on the prompt closes it, a single swipe up makes the prompt shake (it takes two), three fingers down or 3 seconds cancels. A quick double swipe up closes without waiting for the prompt. |
 | **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile, stopping at the ends. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
 | **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. The tray keeps the keyboard while tiles remain, so you can bring back the next one. |
-| **Three-finger triple tap** | Reopen the most recently closed app on the workspace you are on (a fresh copy: tabs and unsaved work are gone). Tap again for the one before, up to ten back. |
+| **Three-finger triple tap** | Undo the last close: the window comes back exactly as it was, onto the workspace you are on. Works for the last window closed with the gesture or from the tray, for 30 seconds. |
 | **Three-finger double tap** | Maximize the focused window, or put a maximized or fullscreen one back. The top bar stays visible. While the tray has the keyboard: flip whether the selected tile comes back maximized (a 󰊓 on the tile shows it will). |
 
 The dock shows one tile per minimized window (a picture of the window, its app icon
@@ -136,10 +136,13 @@ Omarchy's window animation speed.
   tap reaches the app as a middle click 0.3 s late, and a double tap maximizes 0.3 s
   after the second tap. Turn `double_tap_fullscreen` off to get instant three-finger
   middle clicks back (that turns off the double and triple tap).
-- **Reopening closed apps.** Any window you close goes on a list of ten (kept in
-  `~/.local/state/omarchy/threefinger-closed.json`). A window that had its own process
-  comes back with its exact command (a terminal with its program and folder); a browser
-  window or web app, whose process other windows share, comes back from its desktop entry.
+- **Undoing a close.** A window closed with the gesture, the prompt or the tray's ✕ /
+  Backspace / middle click waits for 30 seconds in a hidden workspace
+  (`special:closed`) before it really closes, so the triple tap can bring it back as it
+  was. Only the last one waits: closing another closes it for real. While it waits it
+  keeps running, so sound from it keeps playing until then. If it asks about unsaved
+  work when it really closes, it comes back on screen to ask. SUPER+W and an app's own
+  close button close at once and cannot be undone.
 - **Closing with three fingers up** only happens when the tray does not have the keyboard,
   so swipe down, then up, still brings a window straight back. To bring one back later,
   press SUPER+M first (or click its tile). The prompt blurs the window by switching

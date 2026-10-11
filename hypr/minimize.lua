@@ -527,98 +527,146 @@ function M.dock_focus(on)
   return M.dock_focused
 end
 
--- --------------------------------------------------------- reopen closed
+-- ------------------------------------------------------------- undo close
 
--- Every window's launch command is noted while it is open (its process may be
--- gone by the time it closes), and a closed window's app goes on a short list
--- that a three-finger triple tap reopens from, newest first. The list lives
--- in a file, since Hyprland forgets Lua state on every config reload.
-M.closed_path = os.getenv("HOME") .. "/.local/state/omarchy/threefinger-closed.json"
-M.closed_max = 10
-M.cmdlines = M.cmdlines or {}   -- address -> { pid, cmd = { argv... } }
-local skip_classes = { ["org.omarchy.screensaver"] = true }
+-- Windows closed by the plugin (the three-finger close, the prompt, the
+-- dock's ✕ / Backspace / middle click) are not closed at once: the last one
+-- waits, unseen and untouched, in the hidden workspace `special:closed`, so a
+-- three-finger triple tap can bring it back exactly as it was. Only the last
+-- one: closing another really closes the one waiting. It also really closes
+-- after M.hold_ms, because a waiting window keeps running (a video keeps
+-- playing). If it asks about unsaved work then, it comes back on screen to
+-- ask. The tag min_closed_<fullscreen 0/1/2> keeps all this across a reload.
+M.closed_ws = "special:closed"
+M.hold_ms = 30000
+M.held = M.held or nil   -- { addr, token, mode } for the window waiting
+local held_tokens = 0
 
-local function read_cmdline(pid)
-  if not pid or pid <= 0 then return nil end
-  local f = io.open("/proc/" .. tostring(pid) .. "/cmdline", "rb")
-  if not f then return nil end
-  local raw = f:read("*a") or ""
-  f:close()
-  local argv = {}
-  for part in raw:gmatch("([^%z]+)") do table.insert(argv, part) end
-  return #argv > 0 and argv or nil
+local function closed_tag(w)
+  local tags = w and w.tags
+  if type(tags) ~= "table" then return nil, nil end
+  for _, raw in ipairs(tags) do
+    local t = tostring(raw):gsub("%*$", "")
+    local mode = t:match("^min_closed_(%d)$")
+    if mode then return tonumber(mode), t end
+  end
+  return nil, nil
 end
 
-local function note_window(w)
-  if w and w.address and w.pid then
-    M.cmdlines[w.address] = { pid = w.pid, cmd = read_cmdline(w.pid) }
+local function clear_closed_tags(w)
+  local tags = w and w.tags
+  if type(tags) ~= "table" then return end
+  for _, raw in ipairs(tags) do
+    local t = tostring(raw):gsub("%*$", "")
+    if t:match("^min_closed_%d$") then tag(w, t, false) end
   end
 end
 
-local function load_closed()
-  local f = io.open(M.closed_path, "r")
-  if not f then return {} end
-  local text = f:read("*a") or ""
-  f:close()
-  -- One JSON object per line, newest last.
-  local list = {}
-  for line in text:gmatch("[^\n]+") do table.insert(list, line) end
-  return list
+-- Close for real. If the window is still there a moment later, it is asking
+-- something (unsaved work): bring it to the workspace on screen to ask.
+local function really_close(addr)
+  if M.held and M.held.addr == addr then M.held = nil end
+  local w = find(addr)
+  if not w then return end
+  hl.dispatch(hl.dsp.window.close({ window = w }))
+  after(1500, function()
+    local w2 = find(addr)
+    if w2 and w2.workspace and w2.workspace.name == M.closed_ws then
+      clear_closed_tags(w2)
+      hl.dispatch(hl.dsp.window.move({ window = w2, workspace = current_workspace(), follow = true }))
+    end
+  end)
 end
 
-local function save_closed(list)
-  local f = io.open(M.closed_path, "w")
-  if not f then return end
-  for _, line in ipairs(list) do f:write(line, "\n") end
-  f:close()
+local function hold(addr, mode)
+  held_tokens = held_tokens + 1
+  local token = held_tokens
+  M.held = { addr = addr, token = token, mode = mode or 0 }
+  after(M.hold_ms, function()
+    if M.held and M.held.token == token then really_close(addr) end
+  end)
 end
 
-local function remember_closed(w)
-  local cls = w.class ~= "" and w.class or w.initial_class
-  if not cls or cls == "" or skip_classes[cls] then return end
-  local noted = M.cmdlines[w.address] or {}
-  local pid = noted.pid or w.pid
-  local cmd = noted.cmd or read_cmdline(pid)
-  -- Another window of the same process still open (a browser, a web app):
-  -- its command line would open that process's first window, not this
-  -- one, so the dock reopens it from the app's desktop entry instead.
-  local shared = false
-  for _, o in ipairs(hl.get_windows() or {}) do
-    if o.address ~= w.address and o.pid == pid then shared = true break end
+function M.soft_close(addr)
+  local w = find(addr)
+  if not w then return false end
+  if w.workspace and w.workspace.name == M.closed_ws then return false end
+  if M.held and M.held.addr ~= addr then really_close(M.held.addr) end
+  -- Out of the dock: it is no longer minimized.
+  if w.workspace and w.workspace.name == M.workspace then
+    clear_transient_tags(w)
+    forget(addr)
   end
-  local parts = {}
-  for _, a in ipairs(cmd or {}) do table.insert(parts, json_string(a)) end
-  local line = string.format('{"class":%s,"title":%s,"cmd":[%s],"shared":%s}',
-    json_string(cls), json_string(w.title), table.concat(parts, ","), shared and "true" or "false")
-  local list = load_closed()
-  table.insert(list, line)
-  while #list > M.closed_max do table.remove(list, 1) end
-  save_closed(list)
-end
-
--- Three-finger triple tap: reopen the most recently closed app, on the
--- workspace on screen. A fresh copy: the old window's contents are gone.
-function M.reopen_closed()
-  local list = load_closed()
-  local line = table.remove(list)
-  if not line then
-    notify("Nothing to reopen", "No recently closed apps.")
-    return false
+  local mode = w.fullscreen or 0
+  clear_closed_tags(w)
+  tag(w, "min_flying", true)
+  tag(w, "min_closed_" .. mode, true)
+  hold(addr, mode)
+  local function move_away()
+    local w2 = find(addr)
+    if not w2 then return end
+    hl.dispatch(hl.dsp.window.move({ window = w2, workspace = M.closed_ws, follow = false }))
+    after(300, function()
+      local w3 = find(addr)
+      if w3 then tag(w3, "min_flying", false) end
+    end)
   end
-  save_closed(list)
-  tray("reopen", line)
+  -- A maximized or fullscreen window must drop that before it changes
+  -- workspace (Hyprland hands the state to a neighbour otherwise), and
+  -- Hyprland needs a moment between the two.
+  if mode ~= 0 then
+    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "unset", mode = mode == 1 and "maximized" or "fullscreen" }))
+    after(40, move_away)
+  else
+    move_away()
+  end
   return true
 end
 
-hl.on("window.open", function(w) note_window(w) end)
-for _, w in ipairs(hl.get_windows() or {}) do note_window(w) end
+-- Three-finger triple tap: bring the last closed window back onto the
+-- workspace on screen, maximized again if it was (or fullscreen: maximized,
+-- so the top bar stays visible).
+function M.undo_close()
+  local addr = M.held and M.held.addr
+  local w = addr and find(addr)
+  if not (w and w.workspace and w.workspace.name == M.closed_ws) then
+    M.held = nil
+    notify("Nothing to undo", "Only the last window closed with a gesture or from the tray comes back, for 30 seconds.")
+    return false
+  end
+  local mode = M.held.mode
+  M.held = nil
+  clear_closed_tags(w)
+  hl.dispatch(hl.dsp.window.move({ window = w, workspace = current_workspace(), follow = true }))
+  hl.dispatch(hl.dsp.focus({ window = w }))
+  if mode ~= 0 then
+    after(120, function()
+      local w2 = find(addr)
+      if w2 then hl.dispatch(hl.dsp.window.fullscreen({ window = w2, action = "set", mode = "maximized" })) end
+    end)
+  end
+  return true
+end
+
+-- After a reload: the waiting window is still in special:closed, but its
+-- timer is gone. Keep one waiting (with a fresh timer), close any others.
+local function recover_held()
+  local waiting = {}
+  for _, w in ipairs(hl.get_windows() or {}) do
+    if w.workspace and w.workspace.name == M.closed_ws then table.insert(waiting, w) end
+  end
+  for i, w in ipairs(waiting) do
+    if i < #waiting then really_close(w.address)
+    elseif not (M.held and M.held.addr == w.address) then hold(w.address, closed_tag(w) or 0) end
+  end
+end
+hl.timer(recover_held, { timeout = 400, type = "oneshot" })
 
 -- Hyprland reuses window addresses, so drop what we remember about a window
 -- as soon as it closes (e.g. closed from the dock while minimized).
 hl.on("window.close", function(w)
   if w and w.address then
-    pcall(remember_closed, w)
-    M.cmdlines[w.address] = nil
+    if M.held and M.held.addr == w.address then M.held = nil end
     forget(w.address)
     if M.prompt and M.prompt.addr == w.address then M.cancel_prompt() end
   end
@@ -755,8 +803,7 @@ end
 function M.close_window(addr)
   hide_prompt()
   M.recent_up = nil
-  local w = find(addr)
-  if w then hl.dispatch(hl.dsp.window.close({ window = w })) end
+  M.soft_close(addr)
 end
 
 function M.close_swipe()

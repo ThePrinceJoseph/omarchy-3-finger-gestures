@@ -100,7 +100,7 @@
         "type": "boolean",
         "label": "Double / triple tap",
         "defaultValue": true,
-        "description": "Three-finger double tap maximizes the focused window or puts it back (top bar visible; in the tray: how the selected tile comes back). Triple tap reopens the last closed app. A single three-finger tap (middle click) arrives 0.3 s late."
+        "description": "Three-finger double tap maximizes the focused window or puts it back (top bar visible; in the tray: how the selected tile comes back). Triple tap undoes the last close (gesture or tray, within 30 s). A single three-finger tap (middle click) arrives 0.3 s late."
       },
       {
         "key": "tray_key",

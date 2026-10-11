@@ -48,7 +48,7 @@ Done. Try it:
                              otherwise: close the focused window (swipe twice quickly)
   two fingers left/right     while the tray has the keyboard: pick a tile
   three-finger double tap    maximize / put back
-  three-finger triple tap    reopen the last closed app
+  three-finger triple tap    undo the last close
   SUPER+M                    hand the keyboard to the tray / take it back
 
 Settings: click the 󱂬 icon in the bar, or: omarchy bar set $id <key> <value>
