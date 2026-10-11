@@ -7,16 +7,15 @@ Omarchy shell plugin:
 |---|---|
 | **Three fingers left / right** | Change workspace. The screen follows your fingers and glides into place when you let go. |
 | **Three fingers down** | *Minimize* the focused window: it shrinks down into a tray along the bottom of the screen. While a close prompt is up, cancel it instead. |
-| **Three fingers up** | While the tray has the keyboard: bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. On an empty workspace with the tray idle, the same. Otherwise: offer to close the window on screen. The window blurs behind a prompt; a quick double swipe up or a click on the prompt closes it, a single swipe up makes the prompt shake (it takes two), three fingers down or 3 seconds cancels. A quick double swipe up closes without waiting for the prompt. |
+| **Three fingers up** | While the tray has the keyboard: bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. On an empty workspace with the tray idle, the same. Otherwise: close the window on screen. A quick double swipe up closes it straight away. A single swipe brings up a prompt after 0.7 s, with the window blurred behind it: then a fresh quick double swipe or a click on the prompt closes it, a single swipe makes it shake, and three fingers down or 3 seconds cancels. |
 | **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile, stopping at the ends. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
 | **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. Either way, the tray keeps the keyboard while tiles remain, so you can bring back the next one. |
 | **Three-finger triple tap** | Undo the last close: the window comes back exactly as it was, onto the workspace you are on. Works for the last window closed with the gesture or from the tray, for 30 seconds. |
 | **Three-finger double tap** | Maximize the focused window, or put a maximized or fullscreen one back. The top bar stays visible. While the tray has the keyboard: flip whether the selected tile comes back maximized (a 󰊓 on the tile shows it will). |
 
 The dock shows one tile per minimized window (a picture of the window, its app icon
-and title) and only exists while something is minimized. Hover a tile for a ✕ and a
-larger preview with the full title. Hover a tile to select
-it, click it to bring it back. When a tile lands, the tray takes the keyboard:
+and title) and only exists while something is minimized. Hover a tile to select it and
+show a ✕; click it to bring it back. When a tile lands, the tray takes the keyboard:
 **Left / Right** (or a **two-finger swipe** left or right) pick a tile, **Enter** (or two fingers up) brings it back, **Backspace** closes it,
 **Escape** (or Down, SUPER+M, or a click outside the tray) hands the keyboard back.
 Switching workspace does not: carry windows over and bring them back there. **SUPER+M** hands it to the tray again later. It holds five windows by default (up to twelve): the idea is a quick

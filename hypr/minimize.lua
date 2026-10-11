@@ -789,16 +789,18 @@ end
 -- ------------------------------------------------------------------- close
 
 -- Three fingers up while the dock does not hold the keyboard: close the
--- focused window, after a prompt the dock draws over it (the window blurred
--- behind it). A quick double swipe up closes, whether or not the prompt is up
--- yet; so does a click on the prompt. A single swipe up while the prompt is
--- up is the wrong answer: the prompt shakes and flares (and the swipe still
--- counts as the first half of a double). Three fingers down, a workspace
--- switch or M.prompt_ms of nothing puts it away.
+-- window on screen, after a prompt the dock draws over it (the window blurred
+-- behind it). A first swipe waits M.double_swipe_ms: a second swipe in that
+-- time closes the window without any prompt; otherwise the prompt comes up.
+-- Once it is up, the swipe that brought it does not count: it takes a fresh
+-- quick double swipe (or a click on the prompt) to close, and a single swipe
+-- only shakes it. Three fingers down, a workspace switch or M.prompt_ms of
+-- nothing puts it away.
 M.prompt_ms = 3000
-M.double_swipe_ms = 800
+M.double_swipe_ms = 700
 M.prompt = nil          -- { addr, token } while the prompt is up
-M.recent_up = nil       -- { addr, token } for M.double_swipe_ms after a swipe up
+M.pending_prompt = nil  -- { addr, token } while a first swipe waits to become a prompt
+M.recent_up = nil       -- { addr, token } for M.double_swipe_ms after a swipe on the prompt
 local prompt_tokens = 0
 
 local function hide_prompt()
@@ -820,35 +822,54 @@ function M.close_swipe()
   local w = target_window()
   if not w or (w.workspace and (w.workspace.name == M.workspace or w.workspace.name == M.closed_ws)) then return false end
   local addr = w.address
-  if M.recent_up and M.recent_up.addr == addr then
+  prompt_tokens = prompt_tokens + 1
+  local token = prompt_tokens
+
+  -- The second half of a quick double swipe: close. The prompt never showed.
+  if M.pending_prompt and M.pending_prompt.addr == addr then
+    M.pending_prompt = nil
     M.close_window(addr)
     return true
   end
-  prompt_tokens = prompt_tokens + 1
-  local token = prompt_tokens
-  M.recent_up = { addr = addr, token = token }
-  after(M.double_swipe_ms, function()
-    if M.recent_up and M.recent_up.token == token then M.recent_up = nil end
-  end)
-  local function expire_later()
+
+  -- The prompt is up: it takes a fresh double swipe. The first swipe of it
+  -- (or a lone one) shakes the prompt; a second within M.double_swipe_ms
+  -- closes. The swipe that brought the prompt up does not count.
+  if M.prompt and M.prompt.addr == addr then
+    if M.recent_up and M.recent_up.addr == addr then
+      M.close_window(addr)
+      return true
+    end
+    M.recent_up = { addr = addr, token = token }
+    after(M.double_swipe_ms, function()
+      if M.recent_up and M.recent_up.token == token then M.recent_up = nil end
+    end)
+    M.prompt.token = token
+    tray("closePromptNudge")
     after(M.prompt_ms, function()
       if M.prompt and M.prompt.token == token then hide_prompt() end
     end)
-  end
-  -- Already asking about this window: a single swipe is not the answer.
-  if M.prompt and M.prompt.addr == addr then
-    M.prompt.token = token
-    tray("closePromptNudge")
-    expire_later()
     return true
   end
-  local ax, ay = vec(w.at)
-  local sw, sh = vec(w.size)
-  local mon = monitor(w.monitor)
-  M.prompt = { addr = addr, token = token }
-  set_blur("prompt", M.prompt_blur)
-  tray("closePrompt", rect_json(addr, ax, ay, sw, sh, mon, ',"title":' .. json_string(w.title ~= "" and w.title or w.class)))
-  expire_later()
+
+  -- A first swipe: wait to see if it is a double swipe before asking.
+  M.pending_prompt = { addr = addr, token = token }
+  after(M.double_swipe_ms, function()
+    if not (M.pending_prompt and M.pending_prompt.token == token) then return end
+    M.pending_prompt = nil
+    local w2 = find(addr)
+    if not w2 then return end
+    local ax, ay = vec(w2.at)
+    local sw, sh = vec(w2.size)
+    local mon = monitor(w2.monitor)
+    M.recent_up = nil
+    M.prompt = { addr = addr, token = token }
+    set_blur("prompt", M.prompt_blur)
+    tray("closePrompt", rect_json(addr, ax, ay, sw, sh, mon, ',"title":' .. json_string(w2.title ~= "" and w2.title or w2.class)))
+    after(M.prompt_ms, function()
+      if M.prompt and M.prompt.token == token then hide_prompt() end
+    end)
+  end)
   return true
 end
 
@@ -868,6 +889,9 @@ end
 -- Three fingers down while the prompt is up cancels it (and minimizes
 -- nothing). Returns true if there was a prompt to put away.
 function M.cancel_prompt()
+  -- A swipe up still waiting to become a prompt: drop it, but let the swipe
+  -- down do its own job (minimize), since nothing was on screen to cancel.
+  M.pending_prompt = nil
   if not M.prompt then return false end
   M.recent_up = nil
   hide_prompt()

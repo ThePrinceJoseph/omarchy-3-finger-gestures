@@ -10,7 +10,7 @@ import qs.Commons
 // along the bottom that only exists while the hidden workspace
 // `special:minimized` holds windows. One tile per window: a picture of it,
 // its app icon and title. The selected tile carries an accent border and a
-// dot; hovering shows a larger preview above the dock and a ✕ to close.
+// dot; hovering shows a ✕ to close.
 //
 // Selection: hovering selects. The dock takes the keyboard as soon as a tile
 // lands (and on the tray key), so Left/Right (or Tab, or a two-finger swipe
@@ -54,7 +54,6 @@ Item {
   property int selectedIndex: -1
   property bool focusMode: false
   property int hoverIndex: -1
-  property int previewIndex: -1
   property var firstSeen: ({})
   property int seenCounter: 0
   property bool refreshPending: false
@@ -188,7 +187,6 @@ Item {
     var index = -1
     for (var j = 0; j < next.length; j++) if (next[j].address === wanted) index = j
     root.setSelected(index >= 0 ? index : next.length - 1)
-    if (root.previewIndex >= next.length) root.previewIndex = -1
     if (next.length === 0 || (restored && !root.keepFocusAfterRestore)) root.focusMode = false
     if (restored) root.keepFocusAfterRestore = false
     else if (newest) root.focusMode = true
@@ -280,7 +278,6 @@ Item {
     if (!address) return
     if (keepKeyboard && root.windows.length > 1) { root.keepFocusAfterRestore = true; keepFocusReset.restart() }
     else root.focusMode = false
-    root.previewIndex = -1
     // hyprctl dispatch wants a dispatcher back, so wrap the call.
     Quickshell.execDetached(["hyprctl", "dispatch",
       "(function() Minimize.restore('" + address + "'); return hl.dsp.no_op() end)()"])
@@ -288,7 +285,6 @@ Item {
 
   function closeWindow(address) {
     if (!address) return
-    root.previewIndex = -1
     // Through minimize.lua, so a three-finger triple tap can undo it.
     Quickshell.execDetached(["hyprctl", "dispatch",
       "(function() if Minimize and Minimize.soft_close then Minimize.soft_close('" + address + "') end; return hl.dsp.no_op() end)()"])
@@ -299,14 +295,7 @@ Item {
     root.focusMode = !root.focusMode
   }
 
-  // Hover preview: a short delay so sweeping across the dock does not flash.
-  function hoverTile(index) {
-    root.hoverIndex = index
-    if (index < 0) { previewTimer.stop(); previewHide.restart() }
-    else { previewHide.stop(); if (root.previewIndex >= 0) root.previewIndex = index; else previewTimer.restart() }
-  }
-  Timer { id: previewTimer; interval: 220; onTriggered: if (root.hoverIndex >= 0 && root.thumbnails) root.previewIndex = root.hoverIndex }
-  Timer { id: previewHide; interval: 120; onTriggered: if (root.hoverIndex < 0) root.previewIndex = -1 }
+  function hoverTile(index) { root.hoverIndex = index }
 
   FileView { id: selectedFile; path: root.selectedPath; printErrors: false }
 
@@ -369,7 +358,7 @@ Item {
 
   Component.onCompleted: refresh()
 
-  // Sizes shared by the dock, the preview and the flying proxy.
+  // Sizes shared by the dock and the flying proxy.
   readonly property int edge: Style.space(20)      // clearance to the screen sides
   readonly property int pad: Style.space(10)       // card padding
   readonly property int gap: Style.space(8)        // between tiles
@@ -915,99 +904,6 @@ Item {
     }
   }
 
-  // Larger preview right above the hovered tile: the full title and a bigger
-  // picture. Drawn on a full-screen transparent surface so it can be placed
-  // by exact coordinates; fades in and out.
-  readonly property var previewEntry: (previewIndex >= 0 && previewIndex < windows.length) ? windows[previewIndex] : null
-  property var lastPreviewEntry: null
-  onPreviewEntryChanged: if (previewEntry) lastPreviewEntry = previewEntry
-
-  Variants {
-    model: Quickshell.screens
-
-    PanelWindow {
-      id: previewWindow
-      required property var modelData
-      screen: modelData
-      readonly property bool mine: {
-        var focused = Hyprland.focusedMonitor
-        if (!focused || !focused.name || !previewWindow.screen || !previewWindow.screen.name) return true
-        return focused.name === previewWindow.screen.name
-      }
-      readonly property bool wanted: root.previewEntry !== null && root.thumbnails && mine
-      visible: wanted || previewCard.opacity > 0.01
-      anchors { top: true; bottom: true; left: true; right: true }
-      color: "transparent"
-      exclusionMode: ExclusionMode.Ignore
-      WlrLayershell.namespace: "omarchy-minimized-preview"
-      WlrLayershell.layer: WlrLayer.Overlay
-      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-      mask: Region {}
-
-      Rectangle {
-        id: previewCard
-        readonly property var entry: root.previewEntry || root.lastPreviewEntry
-        readonly property int imgW: Math.min(Style.space(260), Math.round(previewWindow.width * 0.21))
-        readonly property var tileR: root.tileRect(Math.max(0, root.previewIndex), Math.max(1, root.windows.length), previewWindow.screen)
-        width: imgW + 2 * root.pad
-        height: previewTitle.height + Style.space(8) + previewImage.height + 2 * root.pad
-        // Centred over the tile, kept inside the screen, sitting just above the dock.
-        x: Math.max(root.edge, Math.min(previewWindow.width - root.edge - width, tileR.x + tileR.w / 2 - width / 2))
-        y: tileR.y - root.pad - Style.space(10) - height
-        radius: Style.cornerRadius > 0 ? Style.space(12) : 0
-        color: Util.alpha(Color.popups.background, 0.96)
-        border.width: 1
-        border.color: Util.alpha(Color.popups.border, 0.5)
-        opacity: previewWindow.wanted ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-
-        Row {
-          id: previewTitle
-          anchors { top: parent.top; left: parent.left; right: parent.right; margins: root.pad }
-          height: Style.space(20)
-          spacing: Style.space(8)
-          Image {
-            anchors.verticalCenter: parent.verticalCenter
-            width: Style.space(18); height: width
-            source: previewCard.entry ? previewCard.entry.icon : ""
-            sourceSize: Qt.size(width, height)
-          }
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            width: previewTitle.width - Style.space(26)
-            text: previewCard.entry ? previewCard.entry.title : ""
-            color: Color.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-            elide: Text.ElideRight
-            textFormat: Text.PlainText
-          }
-        }
-        Rectangle {
-          anchors { top: previewTitle.bottom; topMargin: Style.space(8); left: parent.left; leftMargin: root.pad }
-          width: previewCard.imgW
-          height: previewImage.height
-          radius: root.frameRadius
-          color: Util.alpha(Color.bar.text, 0.06)
-          border.width: 1
-          border.color: Util.alpha(Color.bar.text, 0.15)
-          Image {
-            id: previewImage
-            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 2 }
-            height: status === Image.Ready && implicitWidth > 0 ? Math.round(width * implicitHeight / implicitWidth) : Math.round(width * 9 / 16)
-            source: previewCard.entry ? previewCard.entry.thumb : ""
-            cache: false
-            asynchronous: true
-            fillMode: Image.PreserveAspectFit
-            smooth: true
-            // No mipmaps here: at this scale they soften text; bilinear is crisper.
-            mipmap: false
-          }
-        }
-      }
-    }
-  }
-
   // Flights: a picture of the window that shrinks from where the window was
   // into its tile (minimize) or grows from the tile back to where the window
   // goes (restore). minimize.lua drives them over IPC and swaps the real
@@ -1279,7 +1175,5 @@ Item {
     function layout(): string { return String(root.dockGeometry.width) + "x" + String(root.dockGeometry.height) + " at x=" + String(root.dockGeometry.x) }
     // Debug: feed one two-finger scroll event of <dx>, <dy> touchpad units (Qt's signs).
     function swipe(dx: int, dy: int): string { root.swipe(dx, dy); return root.selectedAddress }
-    // Debug: force the hover preview for tile <index> (-1 hides).
-    function preview(index: int): string { root.hoverIndex = index; root.previewIndex = index; return "ok" }
   }
 }
