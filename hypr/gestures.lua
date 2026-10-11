@@ -10,6 +10,7 @@
 --   double tap    maximize the focused window or put it back (the top bar stays
 --                 visible); while the tray has the keyboard, whether the
 --                 selected tile comes back maximized
+--   triple tap    reopen the most recently closed app
 --
 -- Settings come from the bar widget (or `omarchy bar set threefinger.gestures
 -- <key> <value>`), which writes ~/.config/hypr/gestures-settings.lua through
@@ -133,15 +134,18 @@ end
 
 -- ---------------------------------------------------------------- double tap
 
--- libinput turns a three-finger tap into a middle click, so the double tap is
--- a bind on the middle button, limited to the touchpads (a mouse's or
--- trackpoint's middle button is left alone). A second tap within
--- double_tap_ms maximizes the focused window, or puts back a maximized or
--- fullscreen one (maximized keeps the top bar visible; true fullscreen would
--- cover it); a lone tap is handed on as the middle
--- click it was (paste, open in a new tab), just double_tap_ms late. While the
--- tray has the keyboard, the double tap goes to the tray instead.
-local double_tap_ms = 300
+-- libinput turns a three-finger tap into a middle click, so the taps are a
+-- bind on the middle button, limited to the touchpads (a mouse's or
+-- trackpoint's middle button is left alone). Taps are counted until
+-- tap_gap_ms passes without another:
+--   one    handed on as the middle click it was (paste, open in a new tab)
+--   two    maximize the focused window, or put back a maximized or fullscreen
+--          one (maximized keeps the top bar visible; true fullscreen would
+--          cover it); while the tray has the keyboard, flip whether the
+--          selected tile comes back maximized
+--   three  reopen the most recently closed app (Minimize.reopen_closed)
+-- So a single tap arrives tap_gap_ms late, and so does a double tap's action.
+local tap_gap_ms = 300
 
 -- Hyprland names input devices by lowercasing their kernel names and turning
 -- spaces and commas into dashes.
@@ -161,39 +165,45 @@ end
 
 -- One three-finger tap (a global, so it can be exercised with hyprctl dispatch).
 ThreeFinger = ThreeFinger or {}
-local waiting = 0  -- a lone tap is pending; its number, so a stale timer can tell
-function ThreeFinger.tap()
-  if waiting > 0 then
-    waiting = 0
-    if Minimize and Minimize.dock_focused then
-      hl.dispatch(hl.dsp.event("threefinger doubletap"))
-    else
-      local w = hl.get_active_window()
-      if w and (w.fullscreen or 0) ~= 0 then
-        -- An unset has to name the mode the window is in, or it does nothing.
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "unset", mode = w.fullscreen == 1 and "maximized" or "fullscreen" }))
-      elseif w then
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "set", mode = "maximized" }))
-      end
-    end
+local taps, tap_token = 0, 0
+
+local function double_tap()
+  if Minimize and Minimize.dock_focused then
+    hl.dispatch(hl.dsp.event("threefinger doubletap"))
     return
   end
-  waiting = waiting + 1
-  local mine = waiting
+  local w = hl.get_active_window()
+  if w and (w.fullscreen or 0) ~= 0 then
+    -- An unset has to name the mode the window is in, or it does nothing.
+    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "unset", mode = w.fullscreen == 1 and "maximized" or "fullscreen" }))
+  elseif w then
+    hl.dispatch(hl.dsp.window.fullscreen({ window = w, action = "set", mode = "maximized" }))
+  end
+end
+
+function ThreeFinger.tap()
+  taps = taps + 1
+  tap_token = tap_token + 1
+  local mine = tap_token
   hl.timer(function()
-    if waiting ~= mine then return end
-    waiting = 0
-    -- A lone tap in the tray means nothing; elsewhere it is a middle click.
-    if not (Minimize and Minimize.dock_focused) then
+    if tap_token ~= mine then return end
+    local n = taps
+    taps = 0
+    if n >= 3 then
+      if Minimize and Minimize.reopen_closed then Minimize.reopen_closed() end
+    elseif n == 2 then
+      double_tap()
+    elseif not (Minimize and Minimize.dock_focused) then
+      -- A lone tap in the tray means nothing; elsewhere it is a middle click.
       hl.dispatch(hl.dsp.send_shortcut({ mods = "", key = "mouse:274" }))
     end
-  end, { timeout = double_tap_ms, type = "oneshot" })
+  end, { timeout = tap_gap_ms, type = "oneshot" })
 end
 
 if opt.double_tap_fullscreen then
   local pads = touchpad_names()
   if #pads > 0 then
     hl.bind("mouse:274", function() ThreeFinger.tap() end,
-      { description = "Three-finger double tap: maximize", device = { inclusive = true, list = pads } })
+      { description = "Three-finger taps: maximize (two), reopen closed app (three)", device = { inclusive = true, list = pads } })
   end
 end

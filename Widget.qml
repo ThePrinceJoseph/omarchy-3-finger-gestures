@@ -221,7 +221,7 @@ Panel {
           }
           SettingNumber { label: "Persistent workspaces"; from: 0; to: 10; value: Number(root.get("persistent_workspaces")); onCommitted: function(v) { root.save({ persistent_workspaces: v }) } }
           Toggle {
-            width: parent.width; label: "Double tap: maximize"; description: "Three-finger double tap maximizes or puts back, top bar visible (in the tray: how the selected tile comes back). A single three-finger tap arrives 0.3 s late."
+            width: parent.width; label: "Double / triple tap"; description: "Three fingers: double tap maximizes or puts back (in the tray: how the selected tile comes back), triple tap reopens the last closed app. A single three-finger tap arrives 0.3 s late."
             checked: root.get("double_tap_fullscreen") === true; foreground: root.foreground; fontFamily: root.fontFamily
             onClicked: root.save({ double_tap_fullscreen: root.get("double_tap_fullscreen") !== true })
           }

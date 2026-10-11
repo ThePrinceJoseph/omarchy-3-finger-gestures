@@ -123,6 +123,29 @@ Item {
     return Quickshell.iconPath("application-x-executable", true)
   }
 
+  // Three-finger triple tap: start the most recently closed app again
+  // (minimize.lua keeps the list). A window that had its own process comes
+  // back with that process's exact command (a terminal with its program and
+  // folder); one that shared a process (a browser window, a web app) from the
+  // app's desktop entry, which the dock already finds for its icons.
+  function reopenApp(payload) {
+    var p
+    try { p = JSON.parse(payload || "{}") } catch (e) { root.log("bad reopen payload: " + e); return "bad json" }
+    var cmd = Array.isArray(p.cmd) ? p.cmd.map(String) : []
+    var entry = root.entryForClass(String(p["class"] || ""))
+    var how
+    if (cmd.length > 0 && !p.shared) how = ["uwsm-app", "--"].concat(cmd)
+    else if (entry && entry.id) how = ["uwsm-app", "--", entry.id + ".desktop"]
+    else if (cmd.length > 0) how = ["uwsm-app", "--"].concat(cmd)
+    if (!how) {
+      Quickshell.execDetached(["notify-send", "-a", "3 Finger Gestures", "-t", "2500", "Can't reopen " + (p.title || p["class"] || "that app"), "No launch command or desktop entry found."])
+      return "nothing to run"
+    }
+    root.log("reopen " + JSON.stringify(how))
+    Quickshell.execDetached(how)
+    return how.join(" ")
+  }
+
   function isMinimized(list, address) {
     for (var i = 0; i < list.length; i++) {
       var c = list[i]
@@ -341,6 +364,7 @@ Item {
     else if (cmd === "closePrompt") root.showClosePrompt(payload)
     else if (cmd === "closePromptHide") root.closePrompt = null
     else if (cmd === "closePromptNudge") root.promptNudges++
+    else if (cmd === "reopen") root.reopenApp(payload)
     else if (cmd === "capture") { var p = JSON.parse(payload); root.requestCapture(p.address, p.path, p.w, p.h) }
   }
 
@@ -821,8 +845,8 @@ Item {
         height: promptColumn.implicitHeight + 3 * root.pad
         radius: Style.cornerRadius > 0 ? Style.space(12) : 0
         color: cardMouse.containsMouse ? Util.alpha(Color.urgent, 0.92) : Util.alpha(Color.popups.background, 0.94)
-        border.width: flaring ? Style.space(3) : 1
-        border.color: flaring ? Color.urgent : Util.alpha(Color.urgent, 0.7)
+        border.width: flaring ? 2 : 1
+        border.color: flaring ? Util.alpha(Color.urgent, 0.95) : Util.alpha(Color.urgent, 0.7)
         Behavior on color { ColorAnimation { duration: 120 } }
         Behavior on border.color { ColorAnimation { duration: 180 } }
         scale: promptWindow.visible ? 1 : 0.94
@@ -831,11 +855,11 @@ Item {
         // A glow outside the ring while it flares.
         Rectangle {
           anchors.fill: parent
-          anchors.margins: -Style.space(6)
-          radius: parent.radius + Style.space(6)
+          anchors.margins: -Style.space(4)
+          radius: parent.radius + Style.space(4)
           color: "transparent"
-          border.width: Style.space(6)
-          border.color: Util.alpha(Color.urgent, promptCard.flaring ? 0.35 : 0)
+          border.width: Style.space(4)
+          border.color: Util.alpha(Color.urgent, promptCard.flaring ? 0.16 : 0)
           Behavior on border.color { ColorAnimation { duration: 180 } }
           z: -1
         }
@@ -849,15 +873,13 @@ Item {
             shake.restart()
           }
         }
-        Timer { id: flareOff; interval: 650; onTriggered: promptCard.flaring = false }
+        Timer { id: flareOff; interval: 500; onTriggered: promptCard.flaring = false }
         SequentialAnimation {
           id: shake
-          property real d: Style.space(14)
-          NumberAnimation { target: promptCard; property: "shakeX"; to: -shake.d; duration: 45; easing.type: Easing.OutQuad }
-          NumberAnimation { target: promptCard; property: "shakeX"; to: shake.d; duration: 70; easing.type: Easing.InOutQuad }
-          NumberAnimation { target: promptCard; property: "shakeX"; to: -shake.d * 0.6; duration: 65; easing.type: Easing.InOutQuad }
-          NumberAnimation { target: promptCard; property: "shakeX"; to: shake.d * 0.3; duration: 55; easing.type: Easing.InOutQuad }
-          NumberAnimation { target: promptCard; property: "shakeX"; to: 0; duration: 45; easing.type: Easing.OutQuad }
+          property real d: Style.space(5)
+          NumberAnimation { target: promptCard; property: "shakeX"; to: -shake.d; duration: 50; easing.type: Easing.OutQuad }
+          NumberAnimation { target: promptCard; property: "shakeX"; to: shake.d * 0.7; duration: 80; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: promptCard; property: "shakeX"; to: 0; duration: 70; easing.type: Easing.OutQuad }
         }
 
         Column {

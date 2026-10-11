@@ -10,6 +10,7 @@ Omarchy shell plugin:
 | **Three fingers up** | While the tray has the keyboard: bring the selected minimized window back onto the workspace you are on now, growing up from the bottom edge. Otherwise: offer to close the focused window. The window blurs behind a prompt; a quick double swipe up or a click on the prompt closes it, a single swipe up makes the prompt shake (it takes two), three fingers down or 3 seconds cancels. A quick double swipe up closes without waiting for the prompt. |
 | **Two fingers left / right** | While the tray has the keyboard (right after a swipe down, or SUPER+M): move the highlight one tile, stopping at the ends. Swipe anywhere; the highlight follows your fingers. It commits like the workspace swipe and uses the same three settings. |
 | **Two fingers up** | While the tray has the keyboard: bring the selected window back, like three fingers up. The tray keeps the keyboard while tiles remain, so you can bring back the next one. |
+| **Three-finger triple tap** | Reopen the most recently closed app on the workspace you are on (a fresh copy: tabs and unsaved work are gone). Tap again for the one before, up to ten back. |
 | **Three-finger double tap** | Maximize the focused window, or put a maximized or fullscreen one back. The top bar stays visible. While the tray has the keyboard: flip whether the selected tile comes back maximized (a 󰊓 on the tile shows it will). |
 
 The dock shows one tile per minimized window (a picture of the window, its app icon
@@ -129,11 +130,16 @@ Omarchy's window animation speed.
   ever maximizes, which leaves the top bar visible; Omarchy's SUPER+F is still true
   fullscreen. Hyprland allows one maximized or fullscreen window per workspace: a tile
   forced maximized onto a workspace with one already takes over from it.
-- **The double tap and middle clicks.** libinput turns a three-finger tap into a middle
-  click, so the double tap is a bind on the touchpad's middle button only (a mouse or
-  trackpoint middle button is untouched). A single tap is held for 0.3 s to see if a
-  second follows, then handed on as the middle click it was. Turn
-  `double_tap_fullscreen` off to get instant three-finger middle clicks back.
+- **Taps and middle clicks.** libinput turns a three-finger tap into a middle click, so
+  the taps are a bind on the touchpad's middle button only (a mouse or trackpoint middle
+  button is untouched). Taps are counted until 0.3 s passes without another, so a single
+  tap reaches the app as a middle click 0.3 s late, and a double tap maximizes 0.3 s
+  after the second tap. Turn `double_tap_fullscreen` off to get instant three-finger
+  middle clicks back (that turns off the double and triple tap).
+- **Reopening closed apps.** Any window you close goes on a list of ten (kept in
+  `~/.local/state/omarchy/threefinger-closed.json`). A window that had its own process
+  comes back with its exact command (a terminal with its program and folder); a browser
+  window or web app, whose process other windows share, comes back from its desktop entry.
 - **Closing with three fingers up** only happens when the tray does not have the keyboard,
   so swipe down, then up, still brings a window straight back. To bring one back later,
   press SUPER+M first (or click its tile). The prompt blurs the window by switching

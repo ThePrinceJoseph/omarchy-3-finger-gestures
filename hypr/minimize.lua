@@ -527,10 +527,98 @@ function M.dock_focus(on)
   return M.dock_focused
 end
 
+-- --------------------------------------------------------- reopen closed
+
+-- Every window's launch command is noted while it is open (its process may be
+-- gone by the time it closes), and a closed window's app goes on a short list
+-- that a three-finger triple tap reopens from, newest first. The list lives
+-- in a file, since Hyprland forgets Lua state on every config reload.
+M.closed_path = os.getenv("HOME") .. "/.local/state/omarchy/threefinger-closed.json"
+M.closed_max = 10
+M.cmdlines = M.cmdlines or {}   -- address -> { pid, cmd = { argv... } }
+local skip_classes = { ["org.omarchy.screensaver"] = true }
+
+local function read_cmdline(pid)
+  if not pid or pid <= 0 then return nil end
+  local f = io.open("/proc/" .. tostring(pid) .. "/cmdline", "rb")
+  if not f then return nil end
+  local raw = f:read("*a") or ""
+  f:close()
+  local argv = {}
+  for part in raw:gmatch("([^%z]+)") do table.insert(argv, part) end
+  return #argv > 0 and argv or nil
+end
+
+local function note_window(w)
+  if w and w.address and w.pid then
+    M.cmdlines[w.address] = { pid = w.pid, cmd = read_cmdline(w.pid) }
+  end
+end
+
+local function load_closed()
+  local f = io.open(M.closed_path, "r")
+  if not f then return {} end
+  local text = f:read("*a") or ""
+  f:close()
+  -- One JSON object per line, newest last.
+  local list = {}
+  for line in text:gmatch("[^\n]+") do table.insert(list, line) end
+  return list
+end
+
+local function save_closed(list)
+  local f = io.open(M.closed_path, "w")
+  if not f then return end
+  for _, line in ipairs(list) do f:write(line, "\n") end
+  f:close()
+end
+
+local function remember_closed(w)
+  local cls = w.class ~= "" and w.class or w.initial_class
+  if not cls or cls == "" or skip_classes[cls] then return end
+  local noted = M.cmdlines[w.address] or {}
+  local pid = noted.pid or w.pid
+  local cmd = noted.cmd or read_cmdline(pid)
+  -- Another window of the same process still open (a browser, a web app):
+  -- its command line would open that process's first window, not this
+  -- one, so the dock reopens it from the app's desktop entry instead.
+  local shared = false
+  for _, o in ipairs(hl.get_windows() or {}) do
+    if o.address ~= w.address and o.pid == pid then shared = true break end
+  end
+  local parts = {}
+  for _, a in ipairs(cmd or {}) do table.insert(parts, json_string(a)) end
+  local line = string.format('{"class":%s,"title":%s,"cmd":[%s],"shared":%s}',
+    json_string(cls), json_string(w.title), table.concat(parts, ","), shared and "true" or "false")
+  local list = load_closed()
+  table.insert(list, line)
+  while #list > M.closed_max do table.remove(list, 1) end
+  save_closed(list)
+end
+
+-- Three-finger triple tap: reopen the most recently closed app, on the
+-- workspace on screen. A fresh copy: the old window's contents are gone.
+function M.reopen_closed()
+  local list = load_closed()
+  local line = table.remove(list)
+  if not line then
+    notify("Nothing to reopen", "No recently closed apps.")
+    return false
+  end
+  save_closed(list)
+  tray("reopen", line)
+  return true
+end
+
+hl.on("window.open", function(w) note_window(w) end)
+for _, w in ipairs(hl.get_windows() or {}) do note_window(w) end
+
 -- Hyprland reuses window addresses, so drop what we remember about a window
 -- as soon as it closes (e.g. closed from the dock while minimized).
 hl.on("window.close", function(w)
   if w and w.address then
+    pcall(remember_closed, w)
+    M.cmdlines[w.address] = nil
     forget(w.address)
     if M.prompt and M.prompt.addr == w.address then M.cancel_prompt() end
   end
