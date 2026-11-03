@@ -5,7 +5,8 @@
 --   left / right  change workspace, gliding with your fingers
 --   down          minimize the focused window into a tray at the bottom
 --   up            dismiss notifications if any are up; else, while the tray has
---                 the keyboard: bring the selected minimized window back;
+--                 the keyboard (or right after a swipe down): bring the selected
+--                 minimized window back;
 --                 otherwise: offer to close the focused window (a quick double
 --                 swipe up closes it)
 --   double tap    maximize the focused window or put it back (the top bar stays
@@ -111,6 +112,7 @@ elseif opt.minimize and Minimize then
     close = opt.swipe_up_close and true or false,
     notifications = opt.swipe_up_notifications and true or false,
     undo = opt.undo_close and true or false,
+    takes_keyboard = opt.tray_takes_keyboard and true or false,
   }
   -- The dock plugin reads its look from this file (it watches for changes).
   local f = io.open(os.getenv("HOME") .. "/.local/state/omarchy/minimized-tray-settings.json", "w")

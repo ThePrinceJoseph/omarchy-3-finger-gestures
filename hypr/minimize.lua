@@ -53,7 +53,13 @@ M.arriving = M.arriving or {} -- workspace -> restores started but not yet moved
 M.dock_focused = M.dock_focused or false -- the dock holds the keyboard (it says so on every change)
 -- Switches from the bar widget (gestures.lua sets them): three fingers up
 -- closes, swipe up dismisses notifications first, closes can be undone.
-M.features = M.features or { close = true, notifications = true, undo = true }
+M.features = M.features or { close = true, notifications = true, undo = true, takes_keyboard = true }
+-- The window just swiped down, while the dock is still on its way to taking
+-- the keyboard for it: the dock only says so once the tile has landed (and
+-- that message takes a while), so a quick swipe up right after a swipe down
+-- would otherwise land on the window behind and offer to close it.
+M.just_minimized = nil    -- { addr, token }
+local just_min_tokens = 0
 
 -- ------------------------------------------------------------------ helpers
 
@@ -348,6 +354,15 @@ function M.minimize(w)
   local file = thumb_path(addr)
   os.remove(file)
   tray("flyOut", rect_json(addr, ax, ay, sw, sh, mon, string.format(',"thumbPath":"%s"', file)))
+  if M.features.takes_keyboard ~= false then
+    just_min_tokens = just_min_tokens + 1
+    local jt = just_min_tokens
+    M.just_minimized = { addr = addr, token = jt }
+    -- Safety net in case the dock never reports: well after it should have landed.
+    after(300 + M.anim_ms + 1500, function()
+      if M.just_minimized and M.just_minimized.token == jt then M.just_minimized = nil end
+    end)
+  end
   after(300, function()
     local op = M.inflight[addr]
     if op and op.token == token then M.stash(addr) end
@@ -528,6 +543,7 @@ end
 -- double tap knows whether it is meant for the dock or for the focused window.
 function M.dock_focus(on)
   M.dock_focused = on and true or false
+  M.just_minimized = nil -- the dock has spoken; trust it from here on
   return M.dock_focused
 end
 
@@ -729,6 +745,21 @@ function M.restore_selected_keep()
   return M.restore_selected()
 end
 
+-- Restore a window that may still be flying into the dock: wait (up to ~2 s)
+-- until it is in the dock and its flight is over, then bring it back.
+function M.restore_when_landed(addr, keep, tries)
+  tries = tries or 0
+  local w = find(addr)
+  if not w then return false end
+  if w.workspace and w.workspace.name == M.workspace and not M.busy[addr] then
+    if keep then tray("keepKeyboard") end
+    return M.restore(addr)
+  end
+  if tries >= 50 then return false end
+  after(40, function() M.restore_when_landed(addr, keep, tries + 1) end)
+  return true
+end
+
 -- Restore everything in the dock at once.
 function M.restore_all()
   for _, w in ipairs(hl.get_workspace_windows(M.workspace)) do M.restore(w.address) end
@@ -874,6 +905,11 @@ function M.swipe_up_start()
     M.up_swipe = { what = "notifications" }
     return "notifications"
   end
+  if M.just_minimized and not M.dock_focused then
+    -- Down then quickly up: bring that same window back once it has landed.
+    M.up_swipe = { what = "restore", keep = true, addr = M.just_minimized.addr }
+    return "restore"
+  end
   if M.dock_focused or not M.features.close then
     M.up_swipe = { what = "restore", keep = M.dock_focused }
     return "restore"
@@ -914,6 +950,7 @@ function M.swipe_up_finish(cancelled)
   if not s or s.what == "notifications" or s.what == "closed" then return false end
   if s.what == "restore" then
     if cancelled then return false end
+    if s.addr then return M.restore_when_landed(s.addr, s.keep) end
     if s.keep then return M.restore_selected_keep() end
     return M.restore_selected()
   end
